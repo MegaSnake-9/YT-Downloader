@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.38"
+VERSION = "0.4.39"
 CONTROL_HEIGHT = 28
 
 
@@ -317,6 +317,27 @@ BRAVE_EXTENSION_ORIGIN = f"chrome-extension://{BRAVE_EXTENSION_ID}"
 
 # Keep command-line helper windows hidden when the GUI runs through pythonw.exe.
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+def external_subprocess_env():
+    """Environment for command-line tools launched by the frozen GUI.
+
+    PyInstaller prepends its bundled library directory to LD_LIBRARY_PATH on
+    Linux.  That is required by the frozen GUI itself, but system helpers
+    launched later by yt-dlp (notably kwallet-query and dbus-send) must use
+    the host distribution's libraries.  PyInstaller preserves the original
+    value in LD_LIBRARY_PATH_ORIG; restore it for external subprocess trees.
+    """
+    env = os.environ.copy()
+    if os.name != "nt" and getattr(sys, "frozen", False):
+        original = env.get("LD_LIBRARY_PATH_ORIG")
+        if original is not None:
+            if original:
+                env["LD_LIBRARY_PATH"] = original
+            else:
+                env.pop("LD_LIBRARY_PATH", None)
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    return env
 
 def tool_executable(name):
     """Return an executable path, preferring portable data/tools."""
@@ -2224,7 +2245,7 @@ def probe_playlist(url, cfg):
         "--print", "%(playlist_index)s\t%(duration)s\t%(title)s"
     ] + cookies_args(cfg) + [url]
 
-    p = subprocess.run(cmd, capture_output=True, text=True, creationflags=NO_WINDOW)
+    p = subprocess.run(cmd, capture_output=True, text=True, creationflags=NO_WINDOW, env=external_subprocess_env())
     finalize_cookie_export(cfg)
     full = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
 
@@ -2269,7 +2290,7 @@ def probe_item_duration(it, cfg):
         tool_executable("yt-dlp"), "--ignore-config", "--skip-download", "--no-playlist",
         "--print", "%(duration)s"
     ] + cookies_args(cfg) + [it.url]
-    p = subprocess.run(cmd, capture_output=True, text=True, creationflags=NO_WINDOW)
+    p = subprocess.run(cmd, capture_output=True, text=True, creationflags=NO_WINDOW, env=external_subprocess_env())
     finalize_cookie_export(cfg)
     full = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
     duration = 0.0
@@ -2515,7 +2536,7 @@ class FormatProbeWorker(QObject):
         else:
             cmd += ["--no-playlist"]
         cmd += cookies_args(self.cfg) + [url]
-        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=NO_WINDOW)
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=NO_WINDOW, env=external_subprocess_env())
         out, err = self.proc.communicate()
         rc = self.proc.returncode
         self.proc = None
@@ -3093,7 +3114,8 @@ class ProbeWorker(QObject):
                 ] + cookies_args(self.cfg) + [self.item.url]
 
             self.proc = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=NO_WINDOW
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=NO_WINDOW,
+                env=external_subprocess_env()
             )
             stdout, _stderr = self.proc.communicate()
             rc = self.proc.returncode
@@ -3185,6 +3207,7 @@ class Worker(QObject):
             text=True,
             bufsize=1,
             creationflags=NO_WINDOW,
+            env=external_subprocess_env(),
         )
 
         for line in self.proc.stdout:
@@ -3931,7 +3954,7 @@ class Settings(QDialog):
         versions = []
         for label, cmd in checks:
             try:
-                p = subprocess.run(cmd, text=True, capture_output=True, timeout=5)
+                p = subprocess.run(cmd, text=True, capture_output=True, timeout=5, env=external_subprocess_env())
                 raw = (p.stdout or p.stderr or "").strip().splitlines()
                 version = raw[0] if raw else "?"
                 versions.append(f"{label}: {version}")
@@ -3967,7 +3990,7 @@ class Settings(QDialog):
             subprocess.Popen([
                 "/usr/bin/pkexec", "/usr/bin/pacman", "-Syu", "--needed",
                 "yt-dlp", "ffmpeg", "atomicparsley"
-            ])
+            ], env=external_subprocess_env())
             QMessageBox.information(self, APP_NAME, tr(self.lang, "update_started"))
         except Exception as e:
             QMessageBox.warning(
@@ -6869,6 +6892,19 @@ def runtime_self_test():
         for tool in ("yt-dlp", "ffmpeg", "ffprobe", "deno"):
             if not tool_available(tool):
                 errors.append(f"bundled tool not found: {tool}")
+
+        # PyInstaller changes LD_LIBRARY_PATH for the frozen GUI.  External
+        # subprocesses must see the original host value instead.
+        if getattr(sys, "frozen", False):
+            current = os.environ.get("LD_LIBRARY_PATH")
+            original = os.environ.get("LD_LIBRARY_PATH_ORIG")
+            sanitized = external_subprocess_env().get("LD_LIBRARY_PATH")
+            expected = original if original else None
+            if sanitized != expected:
+                errors.append(
+                    f"external subprocess environment not sanitized: "
+                    f"current={current!r}, original={original!r}, sanitized={sanitized!r}"
+                )
 
     if errors:
         for error in errors:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.39
+
+- Fix AppImage/KWallet integration at the PyInstaller subprocess boundary.
+- Restore `LD_LIBRARY_PATH_ORIG` for yt-dlp and other external subprocesses, as recommended by PyInstaller.
+- Remove the AppImage kwallet-query/dbus-send wrappers; host desktop helpers are now used directly.
+- Scope bundled FFmpeg libraries to FFmpeg/ffprobe wrappers instead of the whole GUI process.
+- Bundle EGL/GL loader libraries inside the PyInstaller runtime directory.
+- Extend the AppImage self-test to verify subprocess environment sanitization.
+
+
 ## 0.4.38
 
 - Fix AppImage host-helper wrappers for `kwallet-query` and `dbus-send`.

@@ -56,7 +56,7 @@ cp -a "$PYI_DIST/yt-downloader" "$APPDIR/usr/lib/yt-downloader"
 # systems already provide these libraries, but a portable AppImage must not
 # assume that.  Bundle the generic loaders while still letting them discover
 # the host GPU vendor/driver at runtime.
-GL_DIR="$APPDIR/usr/lib/glvnd"
+GL_DIR="$APPDIR/usr/lib/yt-downloader/_internal"
 mkdir -p "$GL_DIR"
 find_system_lib() {
     local name="$1"
@@ -92,79 +92,28 @@ mkdir -p "$DOWNLOADS/ffmpeg"
 tar -xJf "$FFMPEG_ARCHIVE" -C "$DOWNLOADS/ffmpeg"
 FFMPEG_ROOT="$(find "$DOWNLOADS/ffmpeg" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 [[ -n "$FFMPEG_ROOT" ]] || { echo "Could not locate extracted FFmpeg directory" >&2; exit 3; }
-install -m 0755 "$FFMPEG_ROOT/bin/ffmpeg" "$APPDIR/usr/bin/ffmpeg"
-install -m 0755 "$FFMPEG_ROOT/bin/ffprobe" "$APPDIR/usr/bin/ffprobe"
-mkdir -p "$APPDIR/usr/lib/ffmpeg"
-cp -a "$FFMPEG_ROOT/lib/." "$APPDIR/usr/lib/ffmpeg/"
+mkdir -p "$APPDIR/usr/lib/ffmpeg/bin" "$APPDIR/usr/lib/ffmpeg/lib"
+install -m 0755 "$FFMPEG_ROOT/bin/ffmpeg" "$APPDIR/usr/lib/ffmpeg/bin/ffmpeg"
+install -m 0755 "$FFMPEG_ROOT/bin/ffprobe" "$APPDIR/usr/lib/ffmpeg/bin/ffprobe"
+cp -a "$FFMPEG_ROOT/lib/." "$APPDIR/usr/lib/ffmpeg/lib/"
 
-# yt-dlp uses host desktop helpers to decrypt Chromium cookies on Linux.
-# Because AppRun prepends bundled libraries, launching the host kwallet-query
-# or dbus-send directly could make them load AppImage libraries.  Put tiny
-# wrappers earlier in PATH that restore the original host environment first.
-make_host_wrapper() {
-    local name="$1"
-    cat > "$APPDIR/usr/bin/$name" <<'EOF'
+# FFmpeg is bundled, but its shared-library path must apply only to FFmpeg.
+# Keeping it out of the GUI's global LD_LIBRARY_PATH is essential: yt-dlp
+# launches host tools such as kwallet-query/dbus-send for Chromium cookies.
+for tool in ffmpeg ffprobe; do
+    cat > "$APPDIR/usr/bin/$tool" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-
-name="$(basename "$0")"
-self="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
-appdir="${YT_DOWNLOADER_APPDIR:-}"
-host_ld="${YT_DOWNLOADER_HOST_LD_LIBRARY_PATH:-}"
-
-# Do not trust PATH blindly here. AppImage runtimes/launchers may expose the
-# mounted AppDir in PATH, which would make this wrapper find itself again and
-# eventually fail with 127. Prefer normal host locations first.
-candidates=(
-    "/usr/bin/$name"
-    "/usr/local/bin/$name"
-    "/bin/$name"
-    "/usr/sbin/$name"
-    "/usr/local/sbin/$name"
-)
-
-# Also consider any custom directories from the original host PATH, but never
-# the AppImage mount itself and never this wrapper.
-host_path="${YT_DOWNLOADER_HOST_PATH:-}"
-IFS=':' read -r -a host_dirs <<< "$host_path"
-for dir in "${host_dirs[@]}"; do
-    [[ -n "$dir" ]] || continue
-    candidates+=("$dir/$name")
-done
-
-target=""
-for candidate in "${candidates[@]}"; do
-    [[ -x "$candidate" ]] || continue
-    resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
-    [[ "$resolved" != "$self" ]] || continue
-    if [[ -n "$appdir" && "$resolved" == "$appdir"/* ]]; then
-        continue
-    fi
-    target="$resolved"
-    break
-done
-
-if [[ -z "$target" ]]; then
-    echo "$name is not installed on the host system" >&2
-    exit 127
-fi
-
-safe_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-if [[ -n "$host_ld" ]]; then
-    exec /usr/bin/env PATH="$safe_path" LD_LIBRARY_PATH="$host_ld" "$target" "$@"
-else
-    exec /usr/bin/env -u LD_LIBRARY_PATH PATH="$safe_path" "$target" "$@"
-fi
+APPDIR="\$(cd -- "\$(dirname -- "\${BASH_SOURCE[0]}")/../.." && pwd)"
+export LD_LIBRARY_PATH="\$APPDIR/usr/lib/ffmpeg/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}"
+exec "\$APPDIR/usr/lib/ffmpeg/bin/$tool" "\$@"
 EOF
-    chmod +x "$APPDIR/usr/bin/$name"
-}
-make_host_wrapper kwallet-query
-make_host_wrapper dbus-send
+    chmod +x "$APPDIR/usr/bin/$tool"
+done
 
-# Guard against accidental recursive wrappers. A host tool must never resolve
-# back into the AppImage's own usr/bin directory.
-grep -q '/usr/bin/\$name' "$APPDIR/usr/bin/kwallet-query"
-grep -q 'resolved.*!=.*self' "$APPDIR/usr/bin/kwallet-query"
+# Do not bundle or shadow kwallet-query/dbus-send. They are desktop integration
+# helpers and must come from the host distribution. The frozen GUI sanitizes
+# LD_LIBRARY_PATH before launching yt-dlp so those host helpers load host libs.
 
 # AppDir metadata and entrypoint.
 install -m 0755 "$ROOT/packaging/appimage/AppRun" "$APPDIR/AppRun"
