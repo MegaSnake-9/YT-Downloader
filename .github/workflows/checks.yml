@@ -1,0 +1,28 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python-syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile Python source
+        run: python -m py_compile src/yt_downloader.py
+
+      - name: Check shell scripts
+        run: |
+          bash -n scripts/build-portable-preview.sh
+          bash -n packaging/linux-portable/launcher.sh
+          bash -n packaging/linux-portable/create-shortcuts.sh
+          bash -n packaging/linux-portable/remove-shortcuts.sh
+          bash -n packaging/linux-portable/import-existing-settings.sh

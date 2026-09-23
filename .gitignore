@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Build output
+build/
+dist/
+*.AppImage
+*.zsync
+
+# User/runtime data
+/data/
+config.json
+statistics.sqlite3
+queue.json
+*.sqlite3-journal
+*.part
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+*~
+
+# Logs
+*.log

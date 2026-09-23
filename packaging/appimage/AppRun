@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+APPDIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export PATH="$APPDIR/usr/bin:$PATH"
+export PYTHONPATH="$APPDIR/usr/lib/yt-downloader${PYTHONPATH:+:$PYTHONPATH}"
+exec "$APPDIR/usr/bin/python3" "$APPDIR/usr/share/yt-downloader/yt_downloader.py" "$@"

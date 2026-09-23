@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=YT-Downloader
+Comment=Download audio and video using yt-dlp
+Exec=YT-Downloader
+Icon=yt-downloader
+Terminal=false
+Categories=AudioVideo;Network;
+StartupNotify=true
