@@ -49,6 +49,8 @@ jobs:
           test -x squashfs-root/usr/bin/ffmpeg
           test -x squashfs-root/usr/bin/ffprobe
           test -x squashfs-root/usr/bin/deno
+          test -x squashfs-root/usr/bin/kwallet-query
+          test -x squashfs-root/usr/bin/dbus-send
           test -x squashfs-root/usr/lib/yt-downloader/yt-downloader
           test -f squashfs-root/usr/lib/glvnd/libEGL.so.1
           test -f squashfs-root/usr/lib/glvnd/libGLdispatch.so.0

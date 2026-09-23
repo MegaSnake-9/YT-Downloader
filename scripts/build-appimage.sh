@@ -97,6 +97,38 @@ install -m 0755 "$FFMPEG_ROOT/bin/ffprobe" "$APPDIR/usr/bin/ffprobe"
 mkdir -p "$APPDIR/usr/lib/ffmpeg"
 cp -a "$FFMPEG_ROOT/lib/." "$APPDIR/usr/lib/ffmpeg/"
 
+# yt-dlp uses host desktop helpers to decrypt Chromium cookies on Linux.
+# Because AppRun prepends bundled libraries, launching the host kwallet-query
+# or dbus-send directly could make them load AppImage libraries.  Put tiny
+# wrappers earlier in PATH that restore the original host environment first.
+make_host_wrapper() {
+    local name="$1"
+    cat > "$APPDIR/usr/bin/$name" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+name="$(basename "$0")"
+host_path="${YT_DOWNLOADER_HOST_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+host_ld="${YT_DOWNLOADER_HOST_LD_LIBRARY_PATH:-}"
+IFS=':' read -r -a dirs <<< "$host_path"
+target=""
+for dir in "${dirs[@]}"; do
+    [[ -n "$dir" ]] || continue
+    if [[ -x "$dir/$name" ]]; then
+        target="$dir/$name"
+        break
+    fi
+done
+if [[ -z "$target" ]]; then
+    echo "$name is not installed on the host system" >&2
+    exit 127
+fi
+exec env PATH="$host_path" LD_LIBRARY_PATH="$host_ld" "$target" "$@"
+EOF
+    chmod +x "$APPDIR/usr/bin/$name"
+}
+make_host_wrapper kwallet-query
+make_host_wrapper dbus-send
+
 # AppDir metadata and entrypoint.
 install -m 0755 "$ROOT/packaging/appimage/AppRun" "$APPDIR/AppRun"
 install -m 0644 "$ROOT/packaging/appimage/yt-downloader.desktop" "$APPDIR/yt-downloader.desktop"

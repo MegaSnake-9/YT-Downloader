@@ -3,6 +3,12 @@ set -euo pipefail
 
 APPDIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+# Preserve the host environment before prepending AppImage paths.  System
+# integration helpers such as kwallet-query and dbus-send must run against the
+# host KDE/DBus libraries, not libraries bundled for YT-Downloader/FFmpeg.
+export YT_DOWNLOADER_HOST_PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+export YT_DOWNLOADER_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+
 # Bundled command-line helpers are preferred over tools installed on the host.
 export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"
 

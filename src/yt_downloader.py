@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.36"
+VERSION = "0.4.37"
 CONTROL_HEIGHT = 28
 
 
@@ -474,6 +474,7 @@ TR = {
         "kwallet5": "KWallet 5",
         "kwallet_legacy": "KWallet (starszy)",
         "cookie_linux_read_failed": "Nie udało się odczytać cookies z {browser} przez {keyring}. Sprawdź, czy magazyn kluczy jest odblokowany i czy przeglądarka używa tego samego magazynu.",
+        "cookie_linux_auto_failed": "Nie udało się odczytać cookies z {browser} przy automatycznym wyborze magazynu (wykryto: {detected}). Szczegóły techniczne są dostępne w logu błędu.",
         "opera_custom": "Opera GX / niestandardowy profil Opera",
         "cookies_note": "Bez logowania jest domyślne. Dla prywatnej playlisty lub YouTube Music Premium wybierz przeglądarkę zalogowaną do YouTube. Na Linuxie yt-dlp odczytuje cookies bezpośrednio z profilu przeglądarki. Opera GX korzysta z mechanizmu Opera i wymaga ręcznego wskazania profilu.",
         "brave_ext": "Rozszerzenie Chromium:",
@@ -756,6 +757,7 @@ TR = {
         "kwallet5": "KWallet 5",
         "kwallet_legacy": "KWallet (legacy)",
         "cookie_linux_read_failed": "Could not read cookies from {browser} using {keyring}. Check that the keyring is unlocked and that the browser uses the same keyring.",
+        "cookie_linux_auto_failed": "Could not read cookies from {browser} with automatic keyring selection (detected: {detected}). Technical details are available in the error log.",
         "opera_custom": "Opera GX / custom Opera profile",
         "cookies_note": "No login is the default. For a private playlist or YouTube Music Premium, select a browser signed in to YouTube. On Linux, yt-dlp reads cookies directly from the browser profile. Opera GX uses Opera handling and requires a manually selected profile.",
         "brave_ext": "Chromium extension:",
@@ -1446,12 +1448,11 @@ def save_cfg(cfg):
     )
 
 def _auto_linux_keyring():
-    """Resolve yt-dlp's Linux Chromium keyring explicitly when possible.
+    """Return the keyring that yt-dlp is likely to auto-detect, for diagnostics only.
 
-    AppImage runs should not depend on subtle desktop-environment detection
-    differences inside a bundled yt-dlp executable.  KDE Plasma 6 uses
-    kwallet6, Plasma 5 uses kwallet5; common GNOME-family desktops use the
-    GNOME keyring.  Returning an empty string leaves detection to yt-dlp.
+    Do NOT use this value to build --cookies-from-browser in automatic mode.
+    Upstream yt-dlp already detects KDE/GNOME and Chromium's keyring rules, and
+    keeping the browser spec bare matches normal system yt-dlp behavior.
     """
     if os.name == "nt":
         return ""
@@ -1459,31 +1460,34 @@ def _auto_linux_keyring():
     desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
     session = (os.environ.get("DESKTOP_SESSION") or "").lower()
     kde_version = (os.environ.get("KDE_SESSION_VERSION") or "").strip()
-    is_kde = "kde" in desktop or "plasma" in desktop or "kde" in session or "plasma" in session or bool(os.environ.get("KDE_FULL_SESSION"))
-
+    is_kde = (
+        "kde" in desktop or "plasma" in desktop or
+        "kde" in session or "plasma" in session or
+        bool(os.environ.get("KDE_FULL_SESSION"))
+    )
     if is_kde:
         if kde_version == "6":
             return "kwallet6"
         if kde_version == "5":
             return "kwallet5"
-        # On a current KDE desktop with kwallet-query available, Plasma 6 is
-        # the safest first choice. Users can still explicitly choose another
-        # backend in Settings if their browser was launched differently.
-        if shutil.which("kwallet-query"):
-            return "kwallet6"
         return "kwallet"
-
-    if any(x in desktop for x in ("gnome", "cinnamon", "unity", "pantheon")) or any(x in session for x in ("gnome", "cinnamon", "unity")):
+    if any(x in desktop for x in ("gnome", "cinnamon", "unity", "pantheon")) or any(
+        x in session for x in ("gnome", "cinnamon", "unity")
+    ):
         return "gnomekeyring"
     return ""
 
 
 def _resolved_cookie_keyring(cfg):
+    """Return only a keyring explicitly selected by the user.
+
+    An empty value means true yt-dlp automatic detection.  This is intentional:
+    forcing kwallet6 from the GUI changed behavior compared with system yt-dlp
+    and can be wrong when Chromium/Brave was started with another backend.
+    """
     if os.name == "nt":
         return ""
-    explicit = str(cfg.get("cookies_keyring", "") or "").strip().lower()
-    return explicit or _auto_linux_keyring()
-
+    return str(cfg.get("cookies_keyring", "") or "").strip().lower()
 
 def _keyring_display_name(keyring, lang="pl"):
     names = {
@@ -1510,8 +1514,12 @@ def is_cookie_read_error(text):
 def cookie_error_description(cfg, lang):
     browser = browser_display_name(cfg)
     keyring = _resolved_cookie_keyring(cfg)
-    if os.name != "nt" and keyring:
-        return tr(lang, "cookie_linux_read_failed", browser=browser, keyring=_keyring_display_name(keyring, lang))
+    if os.name != "nt":
+        if keyring:
+            return tr(lang, "cookie_linux_read_failed", browser=browser, keyring=_keyring_display_name(keyring, lang))
+        auto_hint = _auto_linux_keyring()
+        detected = _keyring_display_name(auto_hint, lang) if auto_hint else tr(lang, "auto")
+        return tr(lang, "cookie_linux_auto_failed", browser=browser, detected=detected)
     return tr(lang, "e06")
 
 
@@ -6818,9 +6826,9 @@ def runtime_self_test():
             if not (len(browser_cookie) == 2 and browser_cookie[0] == "--cookies-from-browser" and str(browser_cookie[1]).startswith("brave")):
                 errors.append(f"unexpected browser-cookie args: {browser_cookie!r}")
 
-            # Regression check for the portable Linux path that motivated
-            # 0.4.36: automatic cookie decryption on Plasma 6 must resolve to
-            # yt-dlp's explicit kwallet6 backend.
+            # Regression check for 0.4.37: automatic mode must remain true
+            # yt-dlp auto-detection even on Plasma 6.  Explicit kwallet6 is
+            # used only when the user selects it in Settings.
             old_desktop = os.environ.get("XDG_CURRENT_DESKTOP")
             old_kde = os.environ.get("KDE_SESSION_VERSION")
             try:
@@ -6833,8 +6841,18 @@ def runtime_self_test():
                     "cookies_keyring": "",
                     "cookies_file_enabled": False,
                 })
-                if kde_cookie != ["--cookies-from-browser", "brave+kwallet6"]:
-                    errors.append(f"unexpected KDE6 cookie args: {kde_cookie!r}")
+                if kde_cookie != ["--cookies-from-browser", "brave"]:
+                    errors.append(f"automatic KDE6 mode unexpectedly forced a keyring: {kde_cookie!r}")
+
+                explicit_kde_cookie = cookies_args({
+                    "language": "en",
+                    "cookies_browser": "brave",
+                    "cookies_profile": "",
+                    "cookies_keyring": "kwallet6",
+                    "cookies_file_enabled": False,
+                })
+                if explicit_kde_cookie != ["--cookies-from-browser", "brave+kwallet6"]:
+                    errors.append(f"explicit KDE6 cookie args are wrong: {explicit_kde_cookie!r}")
             finally:
                 if old_desktop is None:
                     os.environ.pop("XDG_CURRENT_DESKTOP", None)

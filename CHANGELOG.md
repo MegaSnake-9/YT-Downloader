@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.37
+
+- Restored true yt-dlp automatic keyring selection on Linux instead of forcing KWallet 6.
+- Added AppImage host-environment wrappers for `kwallet-query` and `dbus-send` so KDE cookie decryption uses host libraries.
+- Kept explicit KWallet 6/5/legacy and GNOME Keyring choices for manual override.
+- Updated AppImage self-tests for automatic and explicit keyring behavior.
+
 ## 0.4.36
 
 - Resolve Linux Chromium cookie keyrings explicitly in portable/AppImage builds (including KWallet 6 on Plasma 6).
