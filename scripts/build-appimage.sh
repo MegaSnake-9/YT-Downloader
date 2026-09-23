@@ -106,28 +106,65 @@ make_host_wrapper() {
     cat > "$APPDIR/usr/bin/$name" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+
 name="$(basename "$0")"
-host_path="${YT_DOWNLOADER_HOST_PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+self="$(readlink -f "$0" 2>/dev/null || printf '%s' "$0")"
+appdir="${YT_DOWNLOADER_APPDIR:-}"
 host_ld="${YT_DOWNLOADER_HOST_LD_LIBRARY_PATH:-}"
-IFS=':' read -r -a dirs <<< "$host_path"
-target=""
-for dir in "${dirs[@]}"; do
+
+# Do not trust PATH blindly here. AppImage runtimes/launchers may expose the
+# mounted AppDir in PATH, which would make this wrapper find itself again and
+# eventually fail with 127. Prefer normal host locations first.
+candidates=(
+    "/usr/bin/$name"
+    "/usr/local/bin/$name"
+    "/bin/$name"
+    "/usr/sbin/$name"
+    "/usr/local/sbin/$name"
+)
+
+# Also consider any custom directories from the original host PATH, but never
+# the AppImage mount itself and never this wrapper.
+host_path="${YT_DOWNLOADER_HOST_PATH:-}"
+IFS=':' read -r -a host_dirs <<< "$host_path"
+for dir in "${host_dirs[@]}"; do
     [[ -n "$dir" ]] || continue
-    if [[ -x "$dir/$name" ]]; then
-        target="$dir/$name"
-        break
-    fi
+    candidates+=("$dir/$name")
 done
+
+target=""
+for candidate in "${candidates[@]}"; do
+    [[ -x "$candidate" ]] || continue
+    resolved="$(readlink -f "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    [[ "$resolved" != "$self" ]] || continue
+    if [[ -n "$appdir" && "$resolved" == "$appdir"/* ]]; then
+        continue
+    fi
+    target="$resolved"
+    break
+done
+
 if [[ -z "$target" ]]; then
     echo "$name is not installed on the host system" >&2
     exit 127
 fi
-exec env PATH="$host_path" LD_LIBRARY_PATH="$host_ld" "$target" "$@"
+
+safe_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if [[ -n "$host_ld" ]]; then
+    exec /usr/bin/env PATH="$safe_path" LD_LIBRARY_PATH="$host_ld" "$target" "$@"
+else
+    exec /usr/bin/env -u LD_LIBRARY_PATH PATH="$safe_path" "$target" "$@"
+fi
 EOF
     chmod +x "$APPDIR/usr/bin/$name"
 }
 make_host_wrapper kwallet-query
 make_host_wrapper dbus-send
+
+# Guard against accidental recursive wrappers. A host tool must never resolve
+# back into the AppImage's own usr/bin directory.
+grep -q '/usr/bin/\$name' "$APPDIR/usr/bin/kwallet-query"
+grep -q 'resolved.*!=.*self' "$APPDIR/usr/bin/kwallet-query"
 
 # AppDir metadata and entrypoint.
 install -m 0755 "$ROOT/packaging/appimage/AppRun" "$APPDIR/AppRun"

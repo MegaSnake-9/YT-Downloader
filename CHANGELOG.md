@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.38
+
+- Fix AppImage host-helper wrappers for `kwallet-query` and `dbus-send`.
+- Prefer absolute host tool paths and prevent wrappers from resolving to themselves.
+- Run host KDE/DBus helpers without AppImage `LD_LIBRARY_PATH` contamination.
+- Keep successful downloads successful even when yt-dlp only emits cookie/keyring warnings.
+
 ## 0.4.37
 
 - Restored true yt-dlp automatic keyring selection on Linux instead of forcing KWallet 6.

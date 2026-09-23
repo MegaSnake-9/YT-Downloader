@@ -8,6 +8,7 @@ APPDIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # host KDE/DBus libraries, not libraries bundled for YT-Downloader/FFmpeg.
 export YT_DOWNLOADER_HOST_PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
 export YT_DOWNLOADER_HOST_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+export YT_DOWNLOADER_APPDIR="$APPDIR"
 
 # Bundled command-line helpers are preferred over tools installed on the host.
 export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"

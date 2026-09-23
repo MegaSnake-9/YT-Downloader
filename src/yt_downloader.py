@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.37"
+VERSION = "0.4.38"
 CONTROL_HEIGHT = 28
 
 

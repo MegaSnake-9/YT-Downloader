@@ -51,9 +51,24 @@ jobs:
           test -x squashfs-root/usr/bin/deno
           test -x squashfs-root/usr/bin/kwallet-query
           test -x squashfs-root/usr/bin/dbus-send
+          grep -q "/usr/bin/\$name" squashfs-root/usr/bin/kwallet-query
+          grep -q "resolved.*!=.*self" squashfs-root/usr/bin/kwallet-query
           test -x squashfs-root/usr/lib/yt-downloader/yt-downloader
           test -f squashfs-root/usr/lib/glvnd/libEGL.so.1
           test -f squashfs-root/usr/lib/glvnd/libGLdispatch.so.0
+
+      - name: Test host-helper wrapper resolution
+        run: |
+          mkdir -p /tmp/ytdl-host-tools
+          cat > /tmp/ytdl-host-tools/kwallet-query <<'EOF'
+          #!/usr/bin/env bash
+          test "$1" = "--wrapper-self-test"
+          EOF
+          chmod +x /tmp/ytdl-host-tools/kwallet-query
+          YT_DOWNLOADER_APPDIR="$PWD/squashfs-root" \
+          YT_DOWNLOADER_HOST_PATH="/tmp/ytdl-host-tools" \
+          YT_DOWNLOADER_HOST_LD_LIBRARY_PATH="" \
+            squashfs-root/usr/bin/kwallet-query --wrapper-self-test
 
       - name: Run AppImage runtime self-test
         run: |
