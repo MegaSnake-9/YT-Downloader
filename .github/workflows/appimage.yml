@@ -49,6 +49,11 @@ jobs:
           test -x squashfs-root/usr/bin/deno
           test -x squashfs-root/usr/lib/yt-downloader/yt-downloader
 
+      - name: Run AppImage runtime self-test
+        run: |
+          APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --self-test
+
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:

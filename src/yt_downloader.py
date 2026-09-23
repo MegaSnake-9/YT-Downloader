@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.32"
+VERSION = "0.4.34"
 CONTROL_HEIGHT = 28
 
 
@@ -1434,6 +1434,82 @@ def save_cfg(cfg):
         json.dumps(cfg, ensure_ascii=False, indent=2),
         encoding="utf-8"
     )
+
+def _cookie_browser_spec(cfg):
+    lang = cfg.get("language", "pl")
+    b = cfg.get("cookies_browser", "none")
+    if b in {"none", "chromium-extension"}:
+        return ""
+
+    profile = cfg.get("cookies_profile", "").strip()
+    kr = "" if os.name == "nt" else cfg.get("cookies_keyring", "").strip()
+
+    if b == "opera-gx":
+        if not profile:
+            raise AppError("E06", tr(lang, "opera_profile_required"))
+        b = "opera"
+
+    spec = b
+    if kr and b in {"brave", "chrome", "chromium", "edge", "opera", "vivaldi"}:
+        spec += "+" + kr
+    if profile:
+        spec += ":" + profile
+    return spec
+
+
+def _filter_youtube_cookie_lines(lines):
+    out = ["# Netscape HTTP Cookie File", "# YT-Downloader: YouTube-only cookie import"]
+    kept = 0
+    for raw in lines:
+        line = raw.rstrip("\\r\\n")
+        if not line:
+            continue
+        parsed_line = line[len("#HttpOnly_"):] if line.startswith("#HttpOnly_") else line
+        if parsed_line.startswith("#"):
+            continue
+        parts = parsed_line.split("\\t")
+        if len(parts) < 7:
+            continue
+        domain = parts[0].lstrip(".").lower()
+        if domain == "youtube.com" or domain.endswith(".youtube.com"):
+            out.append(line)
+            kept += 1
+    return out, kept
+
+
+def import_manual_cookie_file(source):
+    """Import a Netscape cookie file and retain only YouTube domains."""
+    src = Path(source)
+    if not src.is_file():
+        return False
+    try:
+        raw = src.read_text(encoding="utf-8", errors="ignore")
+        first = next((x.strip() for x in raw.splitlines() if x.strip()), "")
+        if first not in {"# Netscape HTTP Cookie File", "# HTTP Cookie File"}:
+            return False
+        out, kept = _filter_youtube_cookie_lines(raw.splitlines())
+        if not kept:
+            return False
+        MANUAL_COOKIE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        MANUAL_COOKIE_FILE.write_bytes(("\\r\\n".join(out) + "\\r\\n").encode("utf-8"))
+        return True
+    except Exception:
+        return False
+
+
+def _manual_cookie_enabled(cfg):
+    return bool(cfg.get("cookies_file_enabled", False) and _valid_cookie_cache(MANUAL_COOKIE_FILE))
+
+
+def _extension_cookie_enabled(cfg):
+    # Preferred explicit mode is "chromium-extension". Keep legacy "brave"
+    # compatibility for users upgrading from older Windows portable builds.
+    return bool(
+        os.name == "nt"
+        and cfg.get("cookies_browser", "none") in {"chromium-extension", "brave"}
+        and _valid_cookie_cache(EXTENSION_COOKIE_FILE)
+    )
+
 
 class _BraveCookieBridgeHandler(BaseHTTPRequestHandler):
     server_version = f"YTDownloaderBridge/{VERSION}"
@@ -6616,7 +6692,57 @@ class Main(QMainWindow):
         self.save_queue_state()
         event.accept()
 
+def runtime_self_test():
+    """Small non-GUI smoke test used by AppImage CI.
+
+    It deliberately exercises the cookie command path because missing helper
+    functions there are runtime errors that py_compile cannot detect.
+    """
+    errors = []
+    try:
+        no_cookie = cookies_args({
+            "language": "en",
+            "cookies_browser": "none",
+            "cookies_file_enabled": False,
+        })
+        if no_cookie != []:
+            errors.append(f"unexpected no-cookie args: {no_cookie!r}")
+    except Exception as exc:
+        errors.append(f"cookies_args(no login) failed: {exc!r}")
+
+    if os.name != "nt":
+        try:
+            browser_cookie = cookies_args({
+                "language": "en",
+                "cookies_browser": "brave",
+                "cookies_profile": "",
+                "cookies_keyring": "",
+                "cookies_file_enabled": False,
+            })
+            if browser_cookie != ["--cookies-from-browser", "brave"]:
+                errors.append(f"unexpected browser-cookie args: {browser_cookie!r}")
+        except Exception as exc:
+            errors.append(f"cookies_args(brave) failed: {exc!r}")
+
+    if PORTABLE and os.environ.get("APPIMAGE"):
+        for tool in ("yt-dlp", "ffmpeg", "ffprobe", "deno"):
+            if not tool_available(tool):
+                errors.append(f"bundled tool not found: {tool}")
+
+    if errors:
+        for error in errors:
+            print(f"SELF-TEST ERROR: {error}", file=sys.stderr)
+        return 1
+
+    print(f"YT-Downloader {VERSION} self-test: OK")
+    return 0
+
+
 def main():
+    if "--self-test" in sys.argv[1:]:
+        ensure_portable_dirs()
+        raise SystemExit(runtime_self_test())
+
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     try:
@@ -6636,6 +6762,12 @@ def main():
     # subtle, rounded frame for text fields in themes where the native frame
     # is nearly invisible. Palette roles keep it usable in light/dark/system.
     app.setStyleSheet("""
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top center;
+            padding-left: 4px;
+            padding-right: 4px;
+        }
         QPushButton {
             min-width: 0px;
             padding-left: 10px;

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.34
+
+- Fixed a runtime regression in the portable/AppImage cookie path that caused `NameError: _manual_cookie_enabled is not defined`.
+- Restored browser-cookie, manual-cookie and Windows extension cookie helper functions.
+- Added a non-GUI AppImage runtime self-test so missing runtime helpers and bundled tools fail CI instead of producing a green broken build.
+
+
+## 0.4.33
+
+- Centered all QGroupBox titles explicitly so the layout is consistent in AppImage and across Qt desktop styles.
+
 ## 0.4.32
 
 - Added the first real x86_64 AppImage build pipeline.
