@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.35"
+VERSION = "0.4.36"
 CONTROL_HEIGHT = 28
 
 
@@ -470,6 +470,10 @@ TR = {
         "chromium_ext_setup_title": "Rozszerzenie Chromium — YT-Downloader",
         "chromium_ext_setup_text": "1. Otwórz stronę rozszerzeń swojej przeglądarki:\n   Brave: brave://extensions\n   Chrome/Chromium: chrome://extensions\n   Edge: edge://extensions\n   Vivaldi: vivaldi://extensions\n   Opera / Opera GX: opera://extensions\n\n2. Włącz Tryb dewelopera.\n3. Kliknij „Załaduj rozpakowane”.\n4. Wskaż folder „YT-Downloader-Chromium”, który jest widoczny w otwartym folderze Eksploratora.\n5. Uruchom YT-Downloader i kliknij w rozszerzeniu „Synchronizuj teraz”.\n6. W ustawieniach YT-Downloadera wybierz „Rozszerzenie Chromium (zalecane Windows)”.\n\nRozszerzenie może zostać zainstalowane na stałe — wtedy będzie automatycznie odświeżało cookies YouTube. Po jednorazowej synchronizacji można je usunąć, ale zapisane cookies z czasem mogą wygasnąć lub zostać zmienione przez YouTube.",
         "auto": "Automatycznie",
+        "kwallet6": "KWallet 6",
+        "kwallet5": "KWallet 5",
+        "kwallet_legacy": "KWallet (starszy)",
+        "cookie_linux_read_failed": "Nie udało się odczytać cookies z {browser} przez {keyring}. Sprawdź, czy magazyn kluczy jest odblokowany i czy przeglądarka używa tego samego magazynu.",
         "opera_custom": "Opera GX / niestandardowy profil Opera",
         "cookies_note": "Bez logowania jest domyślne. Dla prywatnej playlisty lub YouTube Music Premium wybierz przeglądarkę zalogowaną do YouTube. Na Linuxie yt-dlp odczytuje cookies bezpośrednio z profilu przeglądarki. Opera GX korzysta z mechanizmu Opera i wymaga ręcznego wskazania profilu.",
         "brave_ext": "Rozszerzenie Chromium:",
@@ -748,6 +752,10 @@ TR = {
         "chromium_ext_setup_title": "Chromium extension — YT-Downloader",
         "chromium_ext_setup_text": "1. Open your browser extension page:\n   Brave: brave://extensions\n   Chrome/Chromium: chrome://extensions\n   Edge: edge://extensions\n   Vivaldi: vivaldi://extensions\n   Opera / Opera GX: opera://extensions\n\n2. Enable Developer mode.\n3. Click “Load unpacked”.\n4. Select the “YT-Downloader-Chromium” folder shown in the Explorer window.\n5. Start YT-Downloader and click “Sync now” in the extension.\n6. In YT-Downloader settings choose “Chromium extension (recommended on Windows)”.\n\nYou can keep the extension installed so it refreshes YouTube cookies automatically. You may remove it after one successful sync, but the saved cookies can later expire or be rotated by YouTube.",
         "auto": "Automatic",
+        "kwallet6": "KWallet 6",
+        "kwallet5": "KWallet 5",
+        "kwallet_legacy": "KWallet (legacy)",
+        "cookie_linux_read_failed": "Could not read cookies from {browser} using {keyring}. Check that the keyring is unlocked and that the browser uses the same keyring.",
         "opera_custom": "Opera GX / custom Opera profile",
         "cookies_note": "No login is the default. For a private playlist or YouTube Music Premium, select a browser signed in to YouTube. On Linux, yt-dlp reads cookies directly from the browser profile. Opera GX uses Opera handling and requires a manually selected profile.",
         "brave_ext": "Chromium extension:",
@@ -955,7 +963,9 @@ BROWSERS += [
 ]
 KEYRINGS = [("", "auto")] if os.name == "nt" else [
     ("", "auto"),
-    ("kwallet", "KWallet"),
+    ("kwallet6", "kwallet6"),
+    ("kwallet5", "kwallet5"),
+    ("kwallet", "kwallet_legacy"),
     ("gnomekeyring", "GNOME Keyring"),
     ("basictext", "Basic text"),
 ]
@@ -1435,6 +1445,76 @@ def save_cfg(cfg):
         encoding="utf-8"
     )
 
+def _auto_linux_keyring():
+    """Resolve yt-dlp's Linux Chromium keyring explicitly when possible.
+
+    AppImage runs should not depend on subtle desktop-environment detection
+    differences inside a bundled yt-dlp executable.  KDE Plasma 6 uses
+    kwallet6, Plasma 5 uses kwallet5; common GNOME-family desktops use the
+    GNOME keyring.  Returning an empty string leaves detection to yt-dlp.
+    """
+    if os.name == "nt":
+        return ""
+
+    desktop = (os.environ.get("XDG_CURRENT_DESKTOP") or "").lower()
+    session = (os.environ.get("DESKTOP_SESSION") or "").lower()
+    kde_version = (os.environ.get("KDE_SESSION_VERSION") or "").strip()
+    is_kde = "kde" in desktop or "plasma" in desktop or "kde" in session or "plasma" in session or bool(os.environ.get("KDE_FULL_SESSION"))
+
+    if is_kde:
+        if kde_version == "6":
+            return "kwallet6"
+        if kde_version == "5":
+            return "kwallet5"
+        # On a current KDE desktop with kwallet-query available, Plasma 6 is
+        # the safest first choice. Users can still explicitly choose another
+        # backend in Settings if their browser was launched differently.
+        if shutil.which("kwallet-query"):
+            return "kwallet6"
+        return "kwallet"
+
+    if any(x in desktop for x in ("gnome", "cinnamon", "unity", "pantheon")) or any(x in session for x in ("gnome", "cinnamon", "unity")):
+        return "gnomekeyring"
+    return ""
+
+
+def _resolved_cookie_keyring(cfg):
+    if os.name == "nt":
+        return ""
+    explicit = str(cfg.get("cookies_keyring", "") or "").strip().lower()
+    return explicit or _auto_linux_keyring()
+
+
+def _keyring_display_name(keyring, lang="pl"):
+    names = {
+        "kwallet6": "KWallet 6",
+        "kwallet5": "KWallet 5",
+        "kwallet": tr(lang, "kwallet_legacy"),
+        "gnomekeyring": "GNOME Keyring",
+        "basictext": "Basic text",
+        "": tr(lang, "auto"),
+    }
+    return names.get(str(keyring or "").lower(), str(keyring or tr(lang, "auto")))
+
+
+def is_cookie_read_error(text):
+    value = (text or "").lower()
+    needles = (
+        "failed to decrypt", "could not decrypt", "cookie database",
+        "kwallet-query", "safe storage", "keyring", "cookies from browser",
+        "failed to read from keyring", "failed to read networkwallet",
+    )
+    return any(n in value for n in needles)
+
+
+def cookie_error_description(cfg, lang):
+    browser = browser_display_name(cfg)
+    keyring = _resolved_cookie_keyring(cfg)
+    if os.name != "nt" and keyring:
+        return tr(lang, "cookie_linux_read_failed", browser=browser, keyring=_keyring_display_name(keyring, lang))
+    return tr(lang, "e06")
+
+
 def _cookie_browser_spec(cfg):
     lang = cfg.get("language", "pl")
     b = cfg.get("cookies_browser", "none")
@@ -1442,7 +1522,7 @@ def _cookie_browser_spec(cfg):
         return ""
 
     profile = cfg.get("cookies_profile", "").strip()
-    kr = "" if os.name == "nt" else cfg.get("cookies_keyring", "").strip()
+    kr = "" if os.name == "nt" else _resolved_cookie_keyring(cfg)
 
     if b == "opera-gx":
         if not profile:
@@ -1961,7 +2041,7 @@ def has_download_success(log):
     return any(x in (log or "") for x in markers)
 
 
-def classify(log, lang):
+def classify(log, lang, cfg=None):
     l = log.lower()
     rules = [
         ("E01", ("not a valid url", "unsupported url", "invalid url"), "e01"),
@@ -1972,13 +2052,15 @@ def classify(log, lang):
         ("E04", ("requested format is not available", "no video formats found"), "e04"),
         ("E05", ("timed out", "network is unreachable", "connection refused",
                  "connection reset"), "e05"),
-        ("E06", ("failed to decrypt", "cookie database", "no such table: meta",
-                 "keyring"), "e06"),
+        ("E06", ("failed to decrypt", "could not decrypt", "cookie database", "no such table: meta",
+                 "keyring", "kwallet-query", "safe storage", "cookies from browser"), "e06"),
         ("E07", ("ffmpeg not found", "ffprobe not found", "ffmpeg exited"), "e07"),
         ("E08", ("permission denied", "read-only file system", "no space left on device"), "e08"),
     ]
     for code, needles, key in rules:
         if any(n in l for n in needles):
+            if code == "E06" and cfg is not None:
+                return code, cookie_error_description(cfg, lang)
             return code, tr(lang, key)
     return "E99", tr(lang, "e99")
 
@@ -2139,7 +2221,7 @@ def probe_playlist(url, cfg):
     full = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
 
     if p.returncode:
-        code, desc = classify(full, lang)
+        code, desc = classify(full, lang, cfg)
         raise AppError(code, desc, full)
 
     entries = []
@@ -2431,7 +2513,14 @@ class FormatProbeWorker(QObject):
         self.proc = None
         finalize_cookie_export(self.cfg)
         if rc != 0:
-            return None, ((out or "") + "\n" + (err or "")).strip()
+            # --dump-single-json may already have written a huge valid JSON
+            # document to stdout before a later cookie/keyring failure makes
+            # yt-dlp exit non-zero.  Never dump that JSON into an error dialog;
+            # stderr contains the actionable diagnostics.
+            details = (err or "").strip()
+            if not details:
+                details = "yt-dlp exited with a non-zero status"
+            return None, details
         try:
             return _extract_format_info(json.loads(out)), ""
         except Exception as exc:
@@ -3336,7 +3425,7 @@ class Worker(QObject):
                             code, desc = partial
                             self.done.emit(it.uid, False, code, desc, full, elapsed, duration, sample_valid)
                         else:
-                            code, desc = classify(full, lang)
+                            code, desc = classify(full, lang, self.cfg)
                             self.done.emit(it.uid, False, code, desc, full, elapsed, duration, False)
 
                 except AppError as e:
@@ -4881,8 +4970,15 @@ class Main(QMainWindow):
                 self.lang, "cookie_locked_windows",
                 browser=browser_display_name(self.cfg)
             )
+        elif is_cookie_read_error(details):
+            msg = "E06: " + cookie_error_description(self.cfg, self.lang)
         else:
-            msg = tr(self.lang, "format_check_failed") + ("\n\n" + details if details else "")
+            # Keep error dialogs readable. Full technical output belongs in
+            # the history/error log, not in a QMessageBox.
+            concise = (details or "").strip()
+            if len(concise) > 1800:
+                concise = concise[-1800:]
+            msg = tr(self.lang, "format_check_failed") + ("\n\n" + concise if concise else "")
         QMessageBox.warning(self, tr(self.lang, "format_check_title"), msg)
 
     def format_probe_finished(self):
@@ -6719,8 +6815,35 @@ def runtime_self_test():
                 "cookies_keyring": "",
                 "cookies_file_enabled": False,
             })
-            if browser_cookie != ["--cookies-from-browser", "brave"]:
+            if not (len(browser_cookie) == 2 and browser_cookie[0] == "--cookies-from-browser" and str(browser_cookie[1]).startswith("brave")):
                 errors.append(f"unexpected browser-cookie args: {browser_cookie!r}")
+
+            # Regression check for the portable Linux path that motivated
+            # 0.4.36: automatic cookie decryption on Plasma 6 must resolve to
+            # yt-dlp's explicit kwallet6 backend.
+            old_desktop = os.environ.get("XDG_CURRENT_DESKTOP")
+            old_kde = os.environ.get("KDE_SESSION_VERSION")
+            try:
+                os.environ["XDG_CURRENT_DESKTOP"] = "KDE"
+                os.environ["KDE_SESSION_VERSION"] = "6"
+                kde_cookie = cookies_args({
+                    "language": "en",
+                    "cookies_browser": "brave",
+                    "cookies_profile": "",
+                    "cookies_keyring": "",
+                    "cookies_file_enabled": False,
+                })
+                if kde_cookie != ["--cookies-from-browser", "brave+kwallet6"]:
+                    errors.append(f"unexpected KDE6 cookie args: {kde_cookie!r}")
+            finally:
+                if old_desktop is None:
+                    os.environ.pop("XDG_CURRENT_DESKTOP", None)
+                else:
+                    os.environ["XDG_CURRENT_DESKTOP"] = old_desktop
+                if old_kde is None:
+                    os.environ.pop("KDE_SESSION_VERSION", None)
+                else:
+                    os.environ["KDE_SESSION_VERSION"] = old_kde
         except Exception as exc:
             errors.append(f"cookies_args(brave) failed: {exc!r}")
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.36
+
+- Resolve Linux Chromium cookie keyrings explicitly in portable/AppImage builds (including KWallet 6 on Plasma 6).
+- Add KWallet 6 and KWallet 5 choices to Settings.
+- Keep format-check errors concise instead of displaying yt-dlp JSON output.
+- Improve E06 diagnostics for browser-cookie/keyring failures.
+
 ## 0.4.35
 
 - Bundle GLVND/EGL loader libraries required by PySide6/Qt in AppImage.
