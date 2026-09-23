@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.32
+
+- Added the first real x86_64 AppImage build pipeline.
+- Added GitHub Actions AppImage artifacts.
+- AppImage bundles PySide6/Qt, yt-dlp, FFmpeg/ffprobe and Deno.
+- Preserved portable `data/` beside the AppImage.
+- Added third-party component notices.
+
 ## 0.4.31
 
 - Added Linux portable-preview data layout (`data/config`, `data/state`, `data/tools`, `data/cache`).

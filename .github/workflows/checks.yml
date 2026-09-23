@@ -22,6 +22,7 @@ jobs:
       - name: Check shell scripts
         run: |
           bash -n scripts/build-portable-preview.sh
+          bash -n scripts/build-appimage.sh
           bash -n packaging/linux-portable/launcher.sh
           bash -n packaging/linux-portable/create-shortcuts.sh
           bash -n packaging/linux-portable/remove-shortcuts.sh

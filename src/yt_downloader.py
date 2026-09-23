@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.31"
+VERSION = "0.4.32"
 CONTROL_HEIGHT = 28
 
 
@@ -1436,7 +1436,7 @@ def save_cfg(cfg):
     )
 
 class _BraveCookieBridgeHandler(BaseHTTPRequestHandler):
-    server_version = "YTDownloaderBridge/0.4.30"
+    server_version = f"YTDownloaderBridge/{VERSION}"
 
     def log_message(self, format, *args):
         # Never print cookie-bearing HTTP requests to stdout/stderr.

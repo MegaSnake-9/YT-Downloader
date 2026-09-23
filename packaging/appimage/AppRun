@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 APPDIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-export PATH="$APPDIR/usr/bin:$PATH"
-export PYTHONPATH="$APPDIR/usr/lib/yt-downloader${PYTHONPATH:+:$PYTHONPATH}"
-exec "$APPDIR/usr/bin/python3" "$APPDIR/usr/share/yt-downloader/yt_downloader.py" "$@"
+
+# Bundled command-line helpers are preferred over tools installed on the host.
+export PATH="$APPDIR/usr/bin${PATH:+:$PATH}"
+
+# The bundled FFmpeg build uses shared libraries shipped inside the AppImage.
+export LD_LIBRARY_PATH="$APPDIR/usr/lib/ffmpeg${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+exec "$APPDIR/usr/lib/yt-downloader/yt-downloader" "$@"

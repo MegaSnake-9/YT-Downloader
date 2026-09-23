@@ -1,0 +1,58 @@
+name: Build AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "assets/**"
+      - "packaging/appimage/**"
+      - "scripts/build-appimage.sh"
+      - "pyproject.toml"
+      - "THIRD_PARTY.md"
+      - ".github/workflows/appimage.yml"
+
+jobs:
+  appimage-x86_64:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build utilities
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl unzip xz-utils
+
+      - name: Build AppImage
+        run: ./scripts/build-appimage.sh
+
+      - name: Verify AppImage structure
+        run: |
+          APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
+          test -n "$APPIMAGE"
+          test -x "$APPIMAGE"
+          "$APPIMAGE" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          test -x squashfs-root/usr/bin/yt-dlp
+          test -x squashfs-root/usr/bin/ffmpeg
+          test -x squashfs-root/usr/bin/ffprobe
+          test -x squashfs-root/usr/bin/deno
+          test -x squashfs-root/usr/lib/yt-downloader/yt-downloader
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YT-Downloader-AppImage-x86_64
+          path: dist/YT-Downloader-*-x86_64.AppImage
+          if-no-files-found: error
+          compression-level: 0

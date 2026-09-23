@@ -2,7 +2,7 @@
 
 YT-Downloader is a desktop GUI for **yt-dlp** built with **Python + PySide6/Qt**. It is focused on convenient audio/video downloading, playlists, format selection, presets, metadata, thumbnails, download history and a portable data layout.
 
-> **Current status:** early public-development / beta. The current Linux portable build is a preview of the future AppImage packaging and is being actively tested on Arch Linux + KDE Plasma.
+> **Current status:** early public-development / beta. The repository now contains an automated x86_64 AppImage build, but it still needs testing across multiple Linux distributions and desktop environments before a stable public release.
 
 ## Highlights
 
@@ -33,7 +33,7 @@ YT-Downloader/
 
 Updating the application will replace only `YT-Downloader.AppImage`; the `data/` directory is left untouched.
 
-The current **Linux Portable Preview** uses the same data model but still relies on system-installed Python/PySide6/yt-dlp/FFmpeg.
+The unpacked **Linux Portable Preview** uses the same data model but relies on system-installed dependencies. The AppImage build bundles the GUI runtime plus yt-dlp, FFmpeg/ffprobe and Deno.
 
 ## Running from source
 
@@ -69,7 +69,13 @@ The generated ZIP is placed in `dist/` and is intentionally ignored by Git.
 
 ## AppImage
 
-A self-contained AppImage is planned. The application-side portable path handling is already present, while the final bundling of Python, Qt/PySide6, yt-dlp, FFmpeg and runtime libraries is still being prepared.
+A self-contained x86_64 AppImage can be built with:
+
+```bash
+./scripts/build-appimage.sh
+```
+
+GitHub Actions also builds it automatically on relevant pushes to `main` and allows a manual build from the **Actions** tab. The resulting AppImage is uploaded as a workflow artifact.
 
 See [`packaging/appimage/README.md`](packaging/appimage/README.md).
 

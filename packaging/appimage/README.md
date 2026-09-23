@@ -1,12 +1,29 @@
 # AppImage packaging
 
-This directory is the scaffold for the final self-contained AppImage.
+The repository can now build a real x86_64 AppImage with:
 
-The application already supports the planned portable layout. When started from an AppImage, it reads the `APPIMAGE` environment variable and stores user data next to the AppImage in:
+```bash
+./scripts/build-appimage.sh
+```
+
+The build freezes the Python/PySide6 GUI with PyInstaller and bundles separate
+executables for:
+
+- yt-dlp
+- FFmpeg / ffprobe (LGPL shared build)
+- Deno (JavaScript runtime used by yt-dlp for YouTube)
+
+`appimagetool` then converts the assembled AppDir into a type-2 AppImage.
+
+## Portable data
+
+When executed as an AppImage, the runtime provides the `APPIMAGE` environment
+variable. YT-Downloader uses the real AppImage path and stores writable data
+beside it:
 
 ```text
 YT-Downloader/
-├── YT-Downloader.AppImage
+├── YT-Downloader-0.x.x-x86_64.AppImage
 └── data/
     ├── config/
     ├── state/
@@ -14,4 +31,15 @@ YT-Downloader/
     └── cache/
 ```
 
-The final builder still needs to bundle Python, PySide6/Qt, yt-dlp, FFmpeg and the remaining runtime libraries into the AppDir. Do not publish a file as an AppImage until it is produced by a real AppImage builder and tested on more than one Linux distribution/desktop environment.
+Replacing only the `.AppImage` therefore leaves user settings/history intact.
+Deleting the entire containing folder removes the application and its portable
+data, unless the user separately created desktop/menu shortcuts.
+
+## GitHub Actions
+
+`.github/workflows/appimage.yml` builds the same AppImage on Ubuntu 22.04 and
+uploads it as a workflow artifact on relevant pushes to `main` or on a manual
+workflow dispatch.
+
+This is still an early Linux-universal build. Test it on multiple distributions
+and desktop environments before calling it a stable release.
