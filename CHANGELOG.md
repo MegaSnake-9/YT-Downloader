@@ -1,6 +1,9 @@
 # Changelog
 
-## 0.4.34
+## 0.4.35
+
+- Bundle GLVND/EGL loader libraries required by PySide6/Qt in AppImage.
+- Run AppImage runtime self-test using Qt offscreen mode in GitHub Actions.
 
 - Fixed a runtime regression in the portable/AppImage cookie path that caused `NameError: _manual_cookie_enabled is not defined`.
 - Restored browser-cookie, manual-cookie and Windows extension cookie helper functions.

@@ -52,6 +52,22 @@ python3 -m venv "$VENV"
 
 cp -a "$PYI_DIST/yt-downloader" "$APPDIR/usr/lib/yt-downloader"
 
+# QtGui from the PySide6 wheel links to the GLVND/EGL loader.  Many desktop
+# systems already provide these libraries, but a portable AppImage must not
+# assume that.  Bundle the generic loaders while still letting them discover
+# the host GPU vendor/driver at runtime.
+GL_DIR="$APPDIR/usr/lib/glvnd"
+mkdir -p "$GL_DIR"
+find_system_lib() {
+    local name="$1"
+    ldconfig -p | awk -v lib="$name" '$1 == lib && $NF ~ /x86_64-linux-gnu/ { print $NF; exit }'
+}
+for lib in libEGL.so.1 libGL.so.1 libGLX.so.0 libOpenGL.so.0 libGLdispatch.so.0; do
+    src="$(find_system_lib "$lib")"
+    [[ -n "$src" && -f "$src" ]] || { echo "Required GL/EGL library not found: $lib" >&2; exit 4; }
+    cp -L "$src" "$GL_DIR/$lib"
+done
+
 # Official yt-dlp standalone executable. It includes the matching yt-dlp-ejs
 # component; Deno below provides the JS runtime required for full YouTube use.
 curl --fail --location --retry 3 \

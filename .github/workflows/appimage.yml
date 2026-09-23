@@ -31,7 +31,9 @@ jobs:
       - name: Install build utilities
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends curl unzip xz-utils
+          sudo apt-get install -y --no-install-recommends \
+            curl unzip xz-utils \
+            libegl1 libgl1 libglx0 libopengl0 libglvnd0
 
       - name: Build AppImage
         run: ./scripts/build-appimage.sh
@@ -48,11 +50,14 @@ jobs:
           test -x squashfs-root/usr/bin/ffprobe
           test -x squashfs-root/usr/bin/deno
           test -x squashfs-root/usr/lib/yt-downloader/yt-downloader
+          test -f squashfs-root/usr/lib/glvnd/libEGL.so.1
+          test -f squashfs-root/usr/lib/glvnd/libGLdispatch.so.0
 
       - name: Run AppImage runtime self-test
         run: |
           APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
-          APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --self-test
+          QT_QPA_PLATFORM=offscreen \
+            APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --self-test
 
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
