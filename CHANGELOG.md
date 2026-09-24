@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.49
+
+- GitHub Release builds now create a ready-to-extract Linux x86_64 portable ZIP in addition to the standalone AppImage.
+- The portable ZIP always extracts to a stable `YT-Downloader/` directory containing the versioned AppImage, a short `README.txt`, and the portable `data/` directory tree.
+- Added pre-created `config`, `state`, `tools`, `cache/cookies` and `integration` directories to the portable package.
+- Release automation now publishes SHA-256 checksums for both the AppImage and portable ZIP.
+- README now recommends the portable ZIP as the simplest download for normal users while keeping the standalone AppImage available.
+
 ## 0.4.48
 
 - Removed the short-lived persistence of main-window and Settings scroll positions; only window sizes and the intended UI visibility/preferences remain saved.

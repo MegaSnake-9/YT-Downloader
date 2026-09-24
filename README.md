@@ -8,11 +8,19 @@ YT-Downloader is a desktop GUI for **yt-dlp**, built with **Python + PySide6/Qt*
 
 ## Download
 
-The recommended Linux build is the latest x86_64 AppImage from **GitHub Releases**:
+The recommended download for most Linux users is the latest **portable ZIP** from **GitHub Releases**:
 
 https://github.com/MegaSnake-9/YT-Downloader/releases/latest
 
-After downloading it, make the file executable and run it:
+Download a file named like:
+
+```text
+YT-Downloader-0.x.x-Linux-x86_64-portable.zip
+```
+
+Extract it and open the resulting `YT-Downloader/` folder. It already contains the AppImage and the portable `data/` directory layout. Run the AppImage inside that folder.
+
+The Release also provides the standalone `YT-Downloader-0.x.x-x86_64.AppImage` for users who prefer to manage the portable folder themselves. If needed, make it executable first:
 
 ```bash
 chmod +x YT-Downloader-*-x86_64.AppImage
@@ -45,11 +53,14 @@ When the AppImage runs, YT-Downloader stores its writable data beside the AppIma
 ```text
 YT-Downloader/
 ├── YT-Downloader-0.x.x-x86_64.AppImage
+├── README.txt
 └── data/
     ├── config/
     ├── state/
     ├── tools/
-    └── cache/
+    ├── cache/
+    │   └── cookies/
+    └── integration/
 ```
 
 Updating replaces only the AppImage and adopts the filename of the new GitHub Release. The `data/` directory is preserved, so settings, history and other portable state remain in place.
@@ -81,7 +92,7 @@ See [`PRIVACY.md`](PRIVACY.md) for a more detailed data-flow summary.
 
 The AppImage checks the repository's latest **GitHub Release**. When a newer x86_64 AppImage is available, YT-Downloader can replace the current AppImage, rename it to the new release filename and leave the neighboring `data/` directory untouched. Update checks/downloads run without blocking the Settings UI and show a progress/status window while work is in progress.
 
-Release builds also publish a SHA-256 checksum next to the AppImage.
+Release builds publish SHA-256 checksums for both the AppImage and the portable ZIP.
 
 ## Running from source
 
@@ -122,7 +133,13 @@ The generated ZIP is placed in `dist/` and is intentionally ignored by Git.
 bash ./scripts/build-appimage.sh
 ```
 
-GitHub Actions also builds the x86_64 AppImage automatically on relevant pushes to `main`. Tags matching `v*` publish a GitHub Release containing the AppImage and its SHA-256 checksum.
+GitHub Actions also builds the x86_64 AppImage automatically on relevant pushes to `main`. It then creates the ready-to-extract portable ZIP. Tags matching `v*` publish a GitHub Release containing the portable ZIP, the standalone AppImage and SHA-256 checksums for both.
+
+To build the portable Release ZIP from an already-built AppImage in `dist/`:
+
+```bash
+bash ./scripts/build-portable-appimage-release.sh
+```
 
 See [`packaging/appimage/README.md`](packaging/appimage/README.md).
 
