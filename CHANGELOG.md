@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.46
+
+- Simplified update-check messages so each result is shown once: newer version available, latest version installed, or version check unavailable.
+- Update checks and AppImage downloads now run in background threads, keeping the Settings window responsive.
+- Added a modal update progress window with an indeterminate progress bar and clear “please wait” status while checking/downloading.
+- Restored the “Add to queue” heading to its 0.4.44 size and rendered Queue, Download history and Current log with the exact same font sizing.
+- New installations now default to `Downloads/YT-Downloader Downloads` (or the localized Downloads directory on Linux); existing configured download folders are preserved.
+
 ## 0.4.45
 
 - In-app AppImage updates now adopt the filename of the downloaded GitHub Release instead of keeping the previous version number in the filename.

@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.45"
+VERSION = "0.4.46"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -408,7 +408,7 @@ def xdg_user_dir(name, fallback):
 
 # Dla nowej instalacji ogólnego YT-Downloadera lepszym miejscem jest
 # Pobrane/Downloads. Istniejąca konfiguracja użytkownika nadal ma pierwszeństwo.
-DEFAULT_DIR = str((Path.home() / "Downloads" / "YT-Downloader") if os.name == "nt" else (xdg_user_dir("DOWNLOAD", "Downloads") / "YT-Downloader"))
+DEFAULT_DIR = str((Path.home() / "Downloads" / "YT-Downloader Downloads") if os.name == "nt" else (xdg_user_dir("DOWNLOAD", "Downloads") / "YT-Downloader Downloads"))
 
 TR = {
     "pl": {
@@ -709,8 +709,11 @@ TR = {
         "update_components": "Aktualizuj z GitHuba…",
         "current_version": "Bieżąca wersja: {version}",
         "latest_version": "Najnowsza wersja: {version}",
-        "update_available": "Dostępna jest wersja {version}.",
-        "update_none": "Masz najnowszą wersję ({version}).",
+        "update_available": "Jest dostępna nowsza wersja: {version}.",
+        "update_none": "Posiadasz najnowszą wersję: {version}.",
+        "update_checking": "Sprawdzam dostępność aktualizacji…",
+        "update_installing": "Pobieram i instaluję YT-Downloader {version}…\nProszę czekać.",
+        "update_check_failed": "Nie można sprawdzić dostępnej wersji. Sprawdź połączenie z internetem i dostęp do GitHuba.\n\nSzczegóły: {error}",
         "update_no_release": "Nie znaleziono publicznego wydania GitHub. Aktualizacje z programu zaczną działać po opublikowaniu Release.",
         "update_not_appimage": "Automatyczna podmiana programu działa w wersji AppImage. Otworzono stronę wydań GitHub.",
         "update_confirm": "Pobrać i zainstalować YT-Downloader {version}? Folder data/ z ustawieniami i historią nie zostanie zmieniony.",
@@ -1015,8 +1018,11 @@ TR = {
         "update_components": "Update from GitHub…",
         "current_version": "Current version: {version}",
         "latest_version": "Latest version: {version}",
-        "update_available": "Version {version} is available.",
-        "update_none": "You already have the latest version ({version}).",
+        "update_available": "A newer version is available: {version}.",
+        "update_none": "You have the latest version: {version}.",
+        "update_checking": "Checking for updates…",
+        "update_installing": "Downloading and installing YT-Downloader {version}…\nPlease wait.",
+        "update_check_failed": "Unable to check the available version. Check your internet connection and access to GitHub.\n\nDetails: {error}",
         "update_no_release": "No public GitHub Release was found. In-app updates will work after a Release is published.",
         "update_not_appimage": "Automatic replacement is available for the AppImage build. The GitHub Releases page was opened.",
         "update_confirm": "Download and install YT-Downloader {version}? Your data/ folder with settings and history will not be changed.",
@@ -4086,12 +4092,43 @@ def install_appimage_release(release):
             pass
 
 
+class GitHubReleaseCheckWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            self.finished.emit(github_latest_release())
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class AppImageInstallWorker(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, release):
+        super().__init__()
+        self.release = release
+
+    def run(self):
+        try:
+            self.finished.emit(install_appimage_release(self.release))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class Settings(QDialog):
     def __init__(self, parent, cfg):
         super().__init__(parent)
         self.base_cfg = dict(cfg)
         self._shared_cfg = cfg
         self.lang = cfg.get("language", "en")
+        self._update_progress = None
+        self._check_thread = None
+        self._check_worker = None
+        self._install_thread = None
+        self._install_worker = None
         self.setWindowTitle(tr(self.lang, "settings_title"))
         self.setMinimumSize(420, 300)
         try:
@@ -4530,68 +4567,157 @@ class Settings(QDialog):
         if p:
             self.profile.setText(p)
 
-    def show_component_versions(self):
-        try:
-            release = github_latest_release()
-            if not release or not release.get("version"):
-                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_no_release"))
-                return
-            latest = release["version"]
-            if _version_tuple(latest) > _version_tuple(VERSION):
-                message = (
-                    tr(self.lang, "latest_version", version=latest) + "\n" +
-                    tr(self.lang, "update_available", version=latest)
-                )
-            else:
-                message = tr(self.lang, "update_none", version=VERSION)
-            QMessageBox.information(self, APP_NAME, message)
-        except Exception as exc:
-            QMessageBox.warning(
-                self, APP_NAME, tr(self.lang, "update_failed", error=str(exc))
-            )
+    def _set_update_buttons_enabled(self, enabled):
+        self.check_versions_btn.setEnabled(bool(enabled))
+        self.update_components_btn.setEnabled(bool(enabled))
 
-    def update_components(self):
-        try:
-            release = github_latest_release()
-            if not release or not release.get("version"):
-                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_no_release"))
-                return
-            latest = release["version"]
-            if _version_tuple(latest) <= _version_tuple(VERSION):
-                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_none", version=VERSION))
-                return
+    def _show_update_progress(self, text):
+        self._close_update_progress()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(APP_NAME)
+        dialog.setModal(True)
+        dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        dialog.setMinimumWidth(360)
+        layout = QVBoxLayout(dialog)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        bar.setTextVisible(False)
+        layout.addWidget(label)
+        layout.addWidget(bar)
+        dialog._message_label = label
+        self._update_progress = dialog
+        dialog.open()
 
-            if not _APPIMAGE_PATH:
-                QDesktopServices.openUrl(QUrl(release.get("page") or GITHUB_RELEASES_URL))
-                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_not_appimage"))
-                return
-
-            ans = QMessageBox.question(
-                self,
-                APP_NAME,
-                tr(self.lang, "update_confirm", version=latest),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if ans != QMessageBox.StandardButton.Yes:
-                return
-
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    def _close_update_progress(self):
+        dialog = self._update_progress
+        self._update_progress = None
+        if dialog is not None:
             try:
-                install_appimage_release(release)
-            finally:
-                QApplication.restoreOverrideCursor()
-            QMessageBox.information(
-                self, APP_NAME, tr(self.lang, "update_downloaded", version=latest)
-            )
-        except Exception as exc:
-            try:
-                QApplication.restoreOverrideCursor()
+                dialog.close()
+                dialog.deleteLater()
             except Exception:
                 pass
-            QMessageBox.warning(
-                self, APP_NAME, tr(self.lang, "update_failed", error=str(exc))
+
+    def _begin_release_check(self, purpose):
+        if self._check_thread is not None or self._install_thread is not None:
+            return
+        self._set_update_buttons_enabled(False)
+        self._show_update_progress(tr(self.lang, "update_checking"))
+        thread = QThread(self)
+        worker = GitHubReleaseCheckWorker()
+        worker.moveToThread(thread)
+        self._check_thread = thread
+        self._check_worker = worker
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda release: self._release_check_finished(release, purpose))
+        worker.failed.connect(self._release_check_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._release_check_thread_finished)
+        thread.start()
+
+    def _release_check_thread_finished(self):
+        self._check_thread = None
+        self._check_worker = None
+        if self._install_thread is None:
+            self._set_update_buttons_enabled(True)
+
+    def _release_check_failed(self, error):
+        self._close_update_progress()
+        self._set_update_buttons_enabled(True)
+        QMessageBox.warning(
+            self, APP_NAME, tr(self.lang, "update_check_failed", error=error)
+        )
+
+    def _release_check_finished(self, release, purpose):
+        self._close_update_progress()
+        if not release or not release.get("version"):
+            self._set_update_buttons_enabled(True)
+            QMessageBox.information(self, APP_NAME, tr(self.lang, "update_no_release"))
+            return
+
+        latest = release["version"]
+        if _version_tuple(latest) <= _version_tuple(VERSION):
+            self._set_update_buttons_enabled(True)
+            QMessageBox.information(
+                self, APP_NAME, tr(self.lang, "update_none", version=VERSION)
             )
+            return
+
+        if purpose == "check":
+            self._set_update_buttons_enabled(True)
+            QMessageBox.information(
+                self, APP_NAME, tr(self.lang, "update_available", version=latest)
+            )
+            return
+
+        if not _APPIMAGE_PATH:
+            self._set_update_buttons_enabled(True)
+            QDesktopServices.openUrl(QUrl(release.get("page") or GITHUB_RELEASES_URL))
+            QMessageBox.information(self, APP_NAME, tr(self.lang, "update_not_appimage"))
+            return
+
+        ans = QMessageBox.question(
+            self,
+            APP_NAME,
+            tr(self.lang, "update_confirm", version=latest),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if ans != QMessageBox.StandardButton.Yes:
+            self._set_update_buttons_enabled(True)
+            return
+        self._begin_appimage_install(release)
+
+    def _begin_appimage_install(self, release):
+        latest = release.get("version") or ""
+        self._set_update_buttons_enabled(False)
+        self._show_update_progress(tr(self.lang, "update_installing", version=latest))
+        thread = QThread(self)
+        worker = AppImageInstallWorker(release)
+        worker.moveToThread(thread)
+        self._install_thread = thread
+        self._install_worker = worker
+        thread.started.connect(worker.run)
+        worker.finished.connect(lambda _target: self._appimage_install_finished(latest))
+        worker.failed.connect(self._appimage_install_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._appimage_install_thread_finished)
+        thread.start()
+
+    def _appimage_install_thread_finished(self):
+        self._install_thread = None
+        self._install_worker = None
+        self._set_update_buttons_enabled(True)
+
+    def _appimage_install_finished(self, version):
+        self._close_update_progress()
+        self._set_update_buttons_enabled(True)
+        QMessageBox.information(
+            self, APP_NAME, tr(self.lang, "update_downloaded", version=version)
+        )
+
+    def _appimage_install_failed(self, error):
+        self._close_update_progress()
+        self._set_update_buttons_enabled(True)
+        QMessageBox.warning(
+            self, APP_NAME, tr(self.lang, "update_failed", error=error)
+        )
+
+    def show_component_versions(self):
+        self._begin_release_check("check")
+
+    def update_components(self):
+        self._begin_release_check("install")
 
     def values(self):
         new_lang = self.language.currentData()
@@ -4723,10 +4849,18 @@ class Main(QMainWindow):
         add_header.setContentsMargins(0, 1, 0, 2)
         add_header.setHorizontalSpacing(8)
         add_header.setVerticalSpacing(0)
-        self.add_title_label = QLabel()
-        self.add_title_label.setObjectName("primarySectionLabel")
-        self.add_title_label.setStyleSheet("font-size: 11pt; font-weight: 500;")
-        self.add_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
+        def make_primary_section_label():
+            label = QLabel()
+            title_font = label.font()
+            if title_font.pointSizeF() > 0:
+                title_font.setPointSizeF(title_font.pointSizeF() + 1.0)
+            else:
+                title_font.setPixelSize(max(13, title_font.pixelSize() + 1))
+            label.setFont(title_font)
+            label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
+            return label
+
+        self.add_title_label = make_primary_section_label()
         self.settings_btn = QPushButton()
         self.settings_btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.settings_btn.clicked.connect(self.open_settings)
@@ -5153,13 +5287,14 @@ class Main(QMainWindow):
         queue_pane_layout.setContentsMargins(0, 0, 0, 0)
 
         self.queue_box = QGroupBox()
-        self.queue_box.setObjectName("primarySectionTitle")
-        self.queue_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
+        self.queue_box.setTitle("")
         self.queue_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
         )
         qv = QVBoxLayout(self.queue_box)
+        self.queue_title_label = make_primary_section_label()
+        qv.addWidget(self.queue_title_label)
 
         self.table = QTableWidget(0, 7)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -5237,13 +5372,14 @@ class Main(QMainWindow):
         # Ukryty panel nie zabiera miejsca, więc kolejka automatycznie dostaje
         # większą część wysokości.
         self.history_box = QGroupBox()
-        self.history_box.setObjectName("primarySectionTitle")
-        self.history_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
+        self.history_box.setTitle("")
         self.history_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
         )
         hv = QVBoxLayout(self.history_box)
+        self.history_title_label = make_primary_section_label()
+        hv.addWidget(self.history_title_label)
         self.history_table = QTableWidget(0, 8)
         self.history_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.history_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -5271,13 +5407,14 @@ class Main(QMainWindow):
         root.addWidget(self.history_box, 2)
 
         self.log_box = QGroupBox()
-        self.log_box.setObjectName("primarySectionTitle")
-        self.log_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
+        self.log_box.setTitle("")
         self.log_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
         )
         lv = QVBoxLayout(self.log_box)
+        self.log_title_label = make_primary_section_label()
+        lv.addWidget(self.log_title_label)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(6000)
@@ -5394,7 +5531,7 @@ class Main(QMainWindow):
         for i in range(self.subtitle_output.count()):
             self.subtitle_output.setItemText(i, tr(lang, sub_out_keys[self.subtitle_output.itemData(i)]))
 
-        self.queue_box.setTitle(tr(lang, "queue"))
+        self.queue_title_label.setText(tr(lang, "queue"))
         self.table.setHorizontalHeaderLabels([
             tr(lang, "col_mode"),
             tr(lang, "col_media"),
@@ -5409,8 +5546,8 @@ class Main(QMainWindow):
         self.open.setText(tr(lang, "open_default"))
         self.stop.setText(tr(lang, "stop"))
         self.download_all.setText(tr(lang, "download_all"))
-        self.log_box.setTitle(tr(lang, "current_log"))
-        self.history_box.setTitle(tr(lang, "history"))
+        self.log_title_label.setText(tr(lang, "current_log"))
+        self.history_title_label.setText(tr(lang, "history"))
         self.history_table.setHorizontalHeaderLabels([
             tr(lang, "history_date"), tr(lang, "history_mode"),
             tr(lang, "col_media"), tr(lang, "col_format"),
@@ -7664,16 +7801,16 @@ def runtime_self_test():
         errors.append(f"side-effect-free command preview test failed: {exc!r}")
 
     try:
-        fake_source = Path("/tmp/YT-Downloader-0.4.44-x86_64.AppImage")
+        fake_source = Path("/tmp/YT-Downloader-0.4.45-x86_64.AppImage")
         target = _release_appimage_target(fake_source, {
-            "version": "0.4.45",
-            "asset_name": "YT-Downloader-0.4.45-x86_64.AppImage",
+            "version": "0.4.46",
+            "asset_name": "YT-Downloader-0.4.46-x86_64.AppImage",
         })
-        if target.name != "YT-Downloader-0.4.45-x86_64.AppImage":
+        if target.name != "YT-Downloader-0.4.46-x86_64.AppImage":
             errors.append(f"AppImage update target naming is wrong: {target.name!r}")
         custom = _release_appimage_target(
             Path("/tmp/YT-Downloader.AppImage"),
-            {"version": "0.4.45", "asset_name": "YT-Downloader-0.4.45-x86_64.AppImage"},
+            {"version": "0.4.46", "asset_name": "YT-Downloader-0.4.46-x86_64.AppImage"},
         )
         if custom.name != "YT-Downloader.AppImage":
             errors.append(f"custom AppImage filename was not preserved: {custom.name!r}")
@@ -7751,14 +7888,6 @@ def main():
             subcontrol-position: top center;
             padding-left: 4px;
             padding-right: 4px;
-        }
-        QGroupBox#primarySectionTitle::title {
-            font-size: 11pt;
-            font-weight: 500;
-        }
-        QLabel#primarySectionLabel {
-            font-size: 11pt;
-            font-weight: 500;
         }
         QPushButton {
             min-width: 0px;
