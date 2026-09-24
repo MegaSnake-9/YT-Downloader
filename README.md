@@ -19,7 +19,7 @@ chmod +x YT-Downloader-*-x86_64.AppImage
 ./YT-Downloader-*-x86_64.AppImage
 ```
 
-No traditional installation is required. From the application settings you can optionally create shortcuts in the desktop environment's application menu and/or on the desktop.
+No traditional installation is required. From the application settings you can optionally create shortcuts in the desktop environment's application menu and/or on the desktop. These shortcuts use a stable portable launcher, so replacing a versioned AppImage manually does not require recreating the shortcut.
 
 ## Highlights
 

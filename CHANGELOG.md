@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.48
+
+- Removed the short-lived persistence of main-window and Settings scroll positions; only window sizes and the intended UI visibility/preferences remain saved.
+- Kept destination-folder selection desktop-native. Icon/list/details view mode is intentionally left to the host file chooser, so KDE/GNOME/XFCE/etc. can remember it using their own native preferences instead of a desktop-specific YT-Downloader hack.
+- Portable desktop/application-menu shortcuts now point to a stable launcher under `data/integration/` instead of directly to a versioned AppImage filename.
+- Existing shortcuts created by older YT-Downloader versions are migrated automatically on startup/update, so manually replacing `YT-Downloader-0.4.xx-x86_64.AppImage` no longer leaves a dead shortcut.
+
 ## 0.4.47
 
 - Fixed the threaded GitHub updater UI freeze by routing worker results back through QObject-bound GUI-thread slots instead of Python lambdas that could execute in the worker thread.

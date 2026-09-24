@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.47"
+VERSION = "0.4.48"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1180,6 +1180,158 @@ def _portable_shortcut_targets():
     }
 
 
+def _portable_integration_paths():
+    if DATA_ROOT is None:
+        return None, None, None
+    integration_dir = DATA_ROOT / "integration"
+    return (
+        integration_dir,
+        integration_dir / "launch-yt-downloader.sh",
+        integration_dir / "current-appimage.path",
+    )
+
+
+def _write_portable_integration_launcher(current_launcher=None):
+    """Create a stable launcher used by optional Linux shortcuts.
+
+    The .desktop files must not point at a versioned AppImage filename. A user
+    may manually replace 0.4.47 with 0.4.48, in which case a direct Exec path
+    would immediately become stale. This tiny launcher lives in data/ and
+    resolves the current AppImage each time it is started.
+    """
+    if os.name == "nt" or DATA_ROOT is None:
+        return None
+    integration_dir, launcher_script, marker = _portable_integration_paths()
+    integration_dir.mkdir(parents=True, exist_ok=True)
+
+    current = current_launcher or _portable_launcher_path()
+    if current:
+        try:
+            marker.write_text(str(Path(current).expanduser().resolve()) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    script = r"""#!/usr/bin/env bash
+set -u
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd -P)"
+MARKER="$ROOT/data/integration/current-appimage.path"
+
+# Read the last path written by YT-Downloader. Deliberate custom/generic
+# filenames are preferred, but an old official versioned path must not pin a
+# shortcut to an outdated AppImage when a newer release sits beside it.
+remembered=""
+if [ -r "$MARKER" ]; then
+    IFS= read -r remembered < "$MARKER" || remembered=""
+    case "${remembered##*/}" in
+        YT-Downloader-*-x86_64.AppImage) ;;
+        *)
+            if [ -n "$remembered" ] && [ -f "$remembered" ]; then
+                chmod +x "$remembered" 2>/dev/null || true
+                exec "$remembered" "$@"
+            fi
+            ;;
+    esac
+fi
+
+# Common stable portable names.
+for candidate in "$ROOT/YT-Downloader.AppImage" "$ROOT/YT-Downloader"; do
+    if [ -f "$candidate" ]; then
+        chmod +x "$candidate" 2>/dev/null || true
+        exec "$candidate" "$@"
+    fi
+done
+
+# Official release names contain the version. Choose the newest version if the
+# user manually copied a new AppImage into the portable folder and deleted the
+# old one. GNU sort -V is available on the mainstream Linux distributions
+# targeted by the AppImage; if unavailable, fall back to the last glob match.
+latest=""
+if command -v sort >/dev/null 2>&1; then
+    latest="$(find "$ROOT" -maxdepth 1 -type f -name 'YT-Downloader-*-x86_64.AppImage' -print 2>/dev/null | sort -V | tail -n 1)"
+fi
+if [ -z "$latest" ]; then
+    for candidate in "$ROOT"/YT-Downloader-*-x86_64.AppImage; do
+        [ -f "$candidate" ] || continue
+        latest="$candidate"
+    done
+fi
+if [ -n "$latest" ] && [ -f "$latest" ]; then
+    chmod +x "$latest" 2>/dev/null || true
+    exec "$latest" "$@"
+fi
+
+printf '%s\n' 'YT-Downloader AppImage was not found in the portable folder.' >&2
+exit 127
+"""
+    launcher_script.write_text(script, encoding="utf-8")
+    launcher_script.chmod(0o755)
+    return launcher_script
+
+
+def _managed_shortcut_text(launcher_script, icon_target):
+    return "\n".join([
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=YT-Downloader",
+        "Comment=GUI downloader for yt-dlp",
+        f"Exec={_desktop_exec_quote(launcher_script)}",
+        f"Icon={icon_target}",
+        "Terminal=false",
+        "Categories=AudioVideo;Network;",
+        "StartupNotify=true",
+        "X-YT-Downloader-Managed=true",
+        "",
+    ])
+
+
+def _looks_like_managed_shortcut(text):
+    return (
+        "Name=YT-Downloader" in text
+        and (
+            "X-YT-Downloader-Managed=true" in text
+            or "Comment=GUI downloader for yt-dlp" in text
+        )
+    )
+
+
+def repair_existing_portable_shortcuts(current_launcher=None):
+    """Migrate existing app-created shortcuts to the stable data/ launcher."""
+    if os.name == "nt" or DATA_ROOT is None:
+        return
+    targets = _portable_shortcut_targets()
+    existing = []
+    for kind, target in targets.items():
+        try:
+            if not target.is_file():
+                continue
+            text = target.read_text(encoding="utf-8")
+            if _looks_like_managed_shortcut(text):
+                existing.append((kind, target))
+        except Exception:
+            pass
+    if not existing:
+        return
+
+    integration_dir, _, _ = _portable_integration_paths()
+    integration_dir.mkdir(parents=True, exist_ok=True)
+    icon_target = integration_dir / "yt-downloader.png"
+    if APP_ICON.is_file():
+        try:
+            shutil.copy2(APP_ICON, icon_target)
+        except Exception:
+            pass
+    launcher_script = _write_portable_integration_launcher(current_launcher)
+    if launcher_script is None:
+        return
+    desktop = _managed_shortcut_text(launcher_script, icon_target)
+    for _kind, target in existing:
+        try:
+            target.write_text(desktop, encoding="utf-8")
+            target.chmod(0o755)
+        except Exception:
+            pass
+
+
 def create_portable_shortcut(kind):
     if os.name == "nt":
         raise RuntimeError("Linux shortcuts are not available on Windows")
@@ -1189,33 +1341,23 @@ def create_portable_shortcut(kind):
     if DATA_ROOT is None:
         raise RuntimeError("portable data directory is unavailable")
 
-    integration_dir = DATA_ROOT / "integration"
+    integration_dir, _, _ = _portable_integration_paths()
     integration_dir.mkdir(parents=True, exist_ok=True)
     icon_target = integration_dir / "yt-downloader.png"
     if APP_ICON.is_file():
         shutil.copy2(APP_ICON, icon_target)
+    launcher_script = _write_portable_integration_launcher(launcher)
+    if launcher_script is None:
+        raise RuntimeError("portable integration launcher is unavailable")
 
     targets = _portable_shortcut_targets()
     if kind not in targets:
         raise ValueError(kind)
     target = targets[kind]
     target.parent.mkdir(parents=True, exist_ok=True)
-    desktop = "\n".join([
-        "[Desktop Entry]",
-        "Type=Application",
-        "Name=YT-Downloader",
-        "Comment=GUI downloader for yt-dlp",
-        f"Exec={_desktop_exec_quote(launcher)}",
-        f"Icon={icon_target}",
-        "Terminal=false",
-        "Categories=AudioVideo;Network;",
-        "StartupNotify=true",
-        "",
-    ])
-    target.write_text(desktop, encoding="utf-8")
+    target.write_text(_managed_shortcut_text(launcher_script, icon_target), encoding="utf-8")
     target.chmod(0o755)
     return target
-
 
 def remove_portable_shortcuts():
     for target in _portable_shortcut_targets().values():
@@ -1225,8 +1367,12 @@ def remove_portable_shortcuts():
             pass
     if DATA_ROOT is not None:
         integration_dir = DATA_ROOT / "integration"
+        for name in ("yt-downloader.png", "launch-yt-downloader.sh", "current-appimage.path"):
+            try:
+                (integration_dir / name).unlink(missing_ok=True)
+            except Exception:
+                pass
         try:
-            (integration_dir / "yt-downloader.png").unlink(missing_ok=True)
             integration_dir.rmdir()
         except Exception:
             pass
@@ -1266,27 +1412,17 @@ ITEM_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*$")
 
 
 def _retarget_existing_portable_shortcuts(old_launcher, new_launcher):
-    """Point existing optional .desktop shortcuts at a renamed AppImage.
+    """Keep app-created shortcuts valid when the AppImage path changes.
 
-    Only YT-Downloader shortcuts created by this application are touched, and
-    only when their Exec line still contains the exact previous AppImage path.
+    Since 0.4.48 shortcuts point at a stable launcher under data/integration,
+    there is no versioned Exec path to retarget. Calling the repair helper also
+    migrates shortcuts created by older versions.
     """
-    if os.name == "nt":
-        return
-    old_exec = f"Exec={_desktop_exec_quote(Path(old_launcher).expanduser().resolve())}"
-    new_exec = f"Exec={_desktop_exec_quote(Path(new_launcher).expanduser().resolve())}"
-    for target in _portable_shortcut_targets().values():
-        try:
-            if not target.is_file():
-                continue
-            text = target.read_text(encoding="utf-8")
-            if old_exec not in text:
-                continue
-            target.write_text(text.replace(old_exec, new_exec), encoding="utf-8")
-            target.chmod(0o755)
-        except Exception:
-            # A shortcut should never make an otherwise successful update fail.
-            pass
+    try:
+        repair_existing_portable_shortcuts(new_launcher)
+    except Exception:
+        # A shortcut should never make an otherwise successful update fail.
+        pass
 
 
 def _release_appimage_target(source, release):
@@ -1718,8 +1854,6 @@ def load_cfg():
         skip_completed_queue=True,
         remember_path_after_add=False,
         theme="system",
-        main_scroll_y=0,
-        settings_scroll_y=0,
         window_width=697,
         window_height=932,
         settings_width=638,
@@ -1804,6 +1938,10 @@ def load_cfg():
     cfg.pop("window_geometry", None)
     cfg.pop("window_x", None)
     cfg.pop("window_y", None)
+    # 0.4.47 briefly persisted scroll positions. They are intentionally
+    # not part of the UI state anymore; keep scrolling session-local.
+    cfg.pop("main_scroll_y", None)
+    cfg.pop("settings_scroll_y", None)
     return cfg
 
 def save_cfg(cfg):
@@ -4454,7 +4592,6 @@ class Settings(QDialog):
         # window: combo boxes, line edits, Choose/Save/Cancel buttons, etc.
         apply_uniform_control_metrics(self)
         self.cookie_state()
-        QTimer.singleShot(0, self.restore_view_state)
         # Rozmiar okna Ustawień jest preferencją interfejsu, więc zapisujemy
         # go także po Anuluj — bez zapisywania zmian formularza.
         self.finished.connect(self.remember_window_size)
@@ -4476,24 +4613,17 @@ class Settings(QDialog):
                 self, APP_NAME, tr(self.lang, "shortcut_failed", error=str(exc))
             )
 
-    def restore_view_state(self):
-        try:
-            self.scroll.verticalScrollBar().setValue(int(self.base_cfg.get("settings_scroll_y", 0)))
-        except Exception:
-            pass
-
     def remember_window_size(self, _result=None):
         try:
             width = max(self.minimumWidth(), int(self.width()))
             height = max(self.minimumHeight(), int(self.height()))
             self.base_cfg["settings_width"] = width
             self.base_cfg["settings_height"] = height
-            scroll_y = int(self.scroll.verticalScrollBar().value()) if hasattr(self, "scroll") else 0
-            self.base_cfg["settings_scroll_y"] = scroll_y
+            self.base_cfg.pop("settings_scroll_y", None)
             if isinstance(self._shared_cfg, dict):
                 self._shared_cfg["settings_width"] = width
                 self._shared_cfg["settings_height"] = height
-                self._shared_cfg["settings_scroll_y"] = scroll_y
+                self._shared_cfg.pop("settings_scroll_y", None)
                 save_cfg(self._shared_cfg)
         except Exception:
             pass
@@ -5501,7 +5631,6 @@ class Main(QMainWindow):
         # Przywróć ostatni rozmiar, stan i (tam, gdzie menedżer okien na to
         # pozwala) pozycję głównego okna dopiero po zbudowaniu całego UI.
         self.restore_window_geometry()
-        QTimer.singleShot(0, self.restore_view_state)
 
     def apply_compact_control_metrics(self):
         """Use compact metrics, with a slightly stronger primary Add button."""
@@ -6429,24 +6558,18 @@ class Main(QMainWindow):
         except Exception:
             pass
 
-    def restore_view_state(self):
-        try:
-            self.scroll.verticalScrollBar().setValue(int(self.cfg.get("main_scroll_y", 0)))
-        except Exception:
-            pass
-
     def save_window_geometry(self):
         """Persist only width/height; placement remains the window manager's job."""
         try:
             size = self.normalGeometry().size() if (self.isMaximized() or self.isFullScreen()) else self.size()
             self.cfg["window_width"] = int(size.width())
             self.cfg["window_height"] = int(size.height())
-            if hasattr(self, "scroll"):
-                self.cfg["main_scroll_y"] = int(self.scroll.verticalScrollBar().value())
-            # Drop obsolete position/geometry keys if they came from older builds.
+            # Drop obsolete position/geometry/scroll keys if they came from older builds.
             self.cfg.pop("window_geometry", None)
             self.cfg.pop("window_x", None)
             self.cfg.pop("window_y", None)
+            self.cfg.pop("main_scroll_y", None)
+            self.cfg.pop("settings_scroll_y", None)
             save_cfg(self.cfg)
         except Exception:
             pass
@@ -8003,6 +8126,9 @@ def main():
     """)
 
     ensure_portable_dirs()
+    # Quietly migrate shortcuts created by older versions from a direct,
+    # versioned AppImage path to the stable portable launcher.
+    repair_existing_portable_shortcuts(_APPIMAGE_PATH)
     window = Main()
     window.show()
     sys.exit(app.exec())
