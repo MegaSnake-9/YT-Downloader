@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.47
+
+- Fixed the threaded GitHub updater UI freeze by routing worker results back through QObject-bound GUI-thread slots instead of Python lambdas that could execute in the worker thread.
+- Added a default-enabled setting to skip queue items that are already marked Ready when Download all is pressed again.
+- Added a default-disabled setting to keep the entered destination path after adding an item to the queue.
+- Main-window and Settings vertical scroll positions are now saved in config together with the existing size/visibility preferences.
+- Main section headings now all receive an exact copy of the 0.4.44 Add-to-queue heading font, while continuing to inherit the desktop's font family.
+
 ## 0.4.46
 
 - Simplified update-check messages so each result is shown once: newer version available, latest version installed, or version check unavailable.

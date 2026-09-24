@@ -32,6 +32,7 @@ No traditional installation is required. From the application settings you can o
 - Support for higher-quality audio streams available to an authenticated YouTube Music Premium account
 - Saved presets
 - Queue, current log and download history
+- Optional skip-completed queue behavior and destination-path retention
 - Error descriptions and stored error logs
 - English and Polish UI
 - Portable application data stored beside the AppImage
@@ -78,7 +79,7 @@ See [`PRIVACY.md`](PRIVACY.md) for a more detailed data-flow summary.
 
 ## Updates
 
-The AppImage checks the repository's latest **GitHub Release**. When a newer x86_64 AppImage is available, YT-Downloader can replace the current AppImage, rename it to the new release filename and leave the neighboring `data/` directory untouched.
+The AppImage checks the repository's latest **GitHub Release**. When a newer x86_64 AppImage is available, YT-Downloader can replace the current AppImage, rename it to the new release filename and leave the neighboring `data/` directory untouched. Update checks/downloads run without blocking the Settings UI and show a progress/status window while work is in progress.
 
 Release builds also publish a SHA-256 checksum next to the AppImage.
 

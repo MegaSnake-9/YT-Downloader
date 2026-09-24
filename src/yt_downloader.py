@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.46"
+VERSION = "0.4.47"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -468,6 +468,7 @@ TR = {
         "invalid_url": "Wklej poprawny adres URL.",
         "cannot_add": "Nie można dodać",
         "empty_queue": "Kolejka jest pusta.",
+        "no_new_queue_items": "Brak nowych pozycji do pobrania. Gotowe pozycje zostały pominięte.",
         "missing_tools": "Brak yt-dlp lub ffmpeg.",
         "thread_closing": "Poprzedni wątek jeszcze się kończy.",
         "stop_requested": "Żądanie przerwania wysłane…",
@@ -661,6 +662,8 @@ TR = {
         "show_current_log": "Wyświetlaj bieżący log",
         "show_presets": "Wyświetlaj presety",
         "show_advanced": "Wyświetlaj zaawansowane yt-dlp",
+        "skip_completed_queue": "Nie pobieraj ponownie gotowych pozycji w kolejce",
+        "remember_path_after_add": "Pamiętaj podaną ścieżkę po dodaniu do kolejki",
         "panel_rows_title": "Widoczne rzędy segmentów",
         "panel_rows_min": "Min.",
         "panel_rows_max": "Maks.",
@@ -777,6 +780,7 @@ TR = {
         "invalid_url": "Paste a valid URL.",
         "cannot_add": "Cannot add",
         "empty_queue": "The queue is empty.",
+        "no_new_queue_items": "There are no new items to download. Completed items were skipped.",
         "missing_tools": "yt-dlp or ffmpeg is missing.",
         "thread_closing": "The previous worker thread is still closing.",
         "stop_requested": "Stop request sent…",
@@ -970,6 +974,8 @@ TR = {
         "show_current_log": "Show current log",
         "show_presets": "Show presets",
         "show_advanced": "Show advanced yt-dlp",
+        "skip_completed_queue": "Do not download completed queue items again",
+        "remember_path_after_add": "Remember the entered path after adding to the queue",
         "panel_rows_title": "Visible panel rows",
         "panel_rows_min": "Min.",
         "panel_rows_max": "Max.",
@@ -1709,7 +1715,11 @@ def load_cfg():
         show_log=True,
         show_presets=True,
         show_advanced=True,
+        skip_completed_queue=True,
+        remember_path_after_add=False,
         theme="system",
+        main_scroll_y=0,
+        settings_scroll_y=0,
         window_width=697,
         window_height=932,
         settings_width=638,
@@ -4129,6 +4139,8 @@ class Settings(QDialog):
         self._check_worker = None
         self._install_thread = None
         self._install_worker = None
+        self._check_purpose = None
+        self._install_version = None
         self.setWindowTitle(tr(self.lang, "settings_title"))
         self.setMinimumSize(420, 300)
         try:
@@ -4139,6 +4151,7 @@ class Settings(QDialog):
         self.resize(settings_w, settings_h)
 
         scroll = QScrollArea()
+        self.scroll = scroll
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -4289,6 +4302,11 @@ class Settings(QDialog):
         self.show_advanced = QCheckBox(tr(self.lang, "show_advanced"))
         self.show_advanced.setChecked(cfg.get("show_advanced", True))
 
+        self.skip_completed_queue = QCheckBox(tr(self.lang, "skip_completed_queue"))
+        self.skip_completed_queue.setChecked(cfg.get("skip_completed_queue", True))
+        self.remember_path_after_add = QCheckBox(tr(self.lang, "remember_path_after_add"))
+        self.remember_path_after_add.setChecked(cfg.get("remember_path_after_add", False))
+
         interface_box = QGroupBox(tr(self.lang, "interface_group"))
         interface_form = QFormLayout(interface_box)
         interface_form.setHorizontalSpacing(10)
@@ -4300,6 +4318,8 @@ class Settings(QDialog):
         interface_form.addRow("", self.show_history)
         interface_form.addRow("", self.confirm_clear_history)
         interface_form.addRow("", self.show_log)
+        interface_form.addRow("", self.skip_completed_queue)
+        interface_form.addRow("", self.remember_path_after_add)
 
         # Użytkownik steruje tylko wysokością trzech dolnych segmentów.
         # Ta sekcja jest osobnym, spójnym kafelkiem zamiast surowej tabelki
@@ -4434,6 +4454,7 @@ class Settings(QDialog):
         # window: combo boxes, line edits, Choose/Save/Cancel buttons, etc.
         apply_uniform_control_metrics(self)
         self.cookie_state()
+        QTimer.singleShot(0, self.restore_view_state)
         # Rozmiar okna Ustawień jest preferencją interfejsu, więc zapisujemy
         # go także po Anuluj — bez zapisywania zmian formularza.
         self.finished.connect(self.remember_window_size)
@@ -4455,15 +4476,24 @@ class Settings(QDialog):
                 self, APP_NAME, tr(self.lang, "shortcut_failed", error=str(exc))
             )
 
+    def restore_view_state(self):
+        try:
+            self.scroll.verticalScrollBar().setValue(int(self.base_cfg.get("settings_scroll_y", 0)))
+        except Exception:
+            pass
+
     def remember_window_size(self, _result=None):
         try:
             width = max(self.minimumWidth(), int(self.width()))
             height = max(self.minimumHeight(), int(self.height()))
             self.base_cfg["settings_width"] = width
             self.base_cfg["settings_height"] = height
+            scroll_y = int(self.scroll.verticalScrollBar().value()) if hasattr(self, "scroll") else 0
+            self.base_cfg["settings_scroll_y"] = scroll_y
             if isinstance(self._shared_cfg, dict):
                 self._shared_cfg["settings_width"] = width
                 self._shared_cfg["settings_height"] = height
+                self._shared_cfg["settings_scroll_y"] = scroll_y
                 save_cfg(self._shared_cfg)
         except Exception:
             pass
@@ -4610,8 +4640,12 @@ class Settings(QDialog):
         worker.moveToThread(thread)
         self._check_thread = thread
         self._check_worker = worker
+        self._check_purpose = purpose
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda release: self._release_check_finished(release, purpose))
+        # Connect only QObject-bound slots here. A plain lambda may execute in
+        # the worker thread under PySide6 and touching dialogs from that thread
+        # can freeze the whole GUI.
+        worker.finished.connect(self._release_check_finished)
         worker.failed.connect(self._release_check_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -4628,13 +4662,16 @@ class Settings(QDialog):
             self._set_update_buttons_enabled(True)
 
     def _release_check_failed(self, error):
+        self._check_purpose = None
         self._close_update_progress()
         self._set_update_buttons_enabled(True)
         QMessageBox.warning(
             self, APP_NAME, tr(self.lang, "update_check_failed", error=error)
         )
 
-    def _release_check_finished(self, release, purpose):
+    def _release_check_finished(self, release):
+        purpose = self._check_purpose or "check"
+        self._check_purpose = None
         self._close_update_progress()
         if not release or not release.get("version"):
             self._set_update_buttons_enabled(True)
@@ -4683,8 +4720,9 @@ class Settings(QDialog):
         worker.moveToThread(thread)
         self._install_thread = thread
         self._install_worker = worker
+        self._install_version = latest
         thread.started.connect(worker.run)
-        worker.finished.connect(lambda _target: self._appimage_install_finished(latest))
+        worker.finished.connect(self._appimage_install_finished)
         worker.failed.connect(self._appimage_install_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
@@ -4699,7 +4737,9 @@ class Settings(QDialog):
         self._install_worker = None
         self._set_update_buttons_enabled(True)
 
-    def _appimage_install_finished(self, version):
+    def _appimage_install_finished(self, _target):
+        version = self._install_version or ""
+        self._install_version = None
         self._close_update_progress()
         self._set_update_buttons_enabled(True)
         QMessageBox.information(
@@ -4707,6 +4747,7 @@ class Settings(QDialog):
         )
 
     def _appimage_install_failed(self, error):
+        self._install_version = None
         self._close_update_progress()
         self._set_update_buttons_enabled(True)
         QMessageBox.warning(
@@ -4754,6 +4795,8 @@ class Settings(QDialog):
             show_log=self.show_log.isChecked(),
             show_presets=self.show_presets.isChecked(),
             show_advanced=self.show_advanced.isChecked(),
+            skip_completed_queue=self.skip_completed_queue.isChecked(),
+            remember_path_after_add=self.remember_path_after_add.isChecked(),
             theme=self.theme.currentData() or "system",
             settings_width=max(self.minimumWidth(), int(self.width())),
             settings_height=max(self.minimumHeight(), int(self.height())),
@@ -4849,18 +4892,25 @@ class Main(QMainWindow):
         add_header.setContentsMargins(0, 1, 0, 2)
         add_header.setHorizontalSpacing(8)
         add_header.setVerticalSpacing(0)
+        # Dokładnie taki font jak w nagłówku „Dodaj do kolejki” z 0.4.44.
+        # Nie narzucamy rodziny fontu: dziedziczymy ją z systemu/Qt i
+        # powiększamy tylko rozmiar o 1 pt. Wszystkie cztery nagłówki dostają
+        # kopię tego samego QFont, aby KDE nie renderowało ich inaczej przez
+        # typ kontrolki.
+        self.add_title_label = QLabel()
+        section_title_font = self.add_title_label.font()
+        if section_title_font.pointSizeF() > 0:
+            section_title_font.setPointSizeF(section_title_font.pointSizeF() + 1.0)
+        else:
+            section_title_font.setPixelSize(max(13, section_title_font.pixelSize() + 1))
+        self.add_title_label.setFont(section_title_font)
+        self.add_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
+
         def make_primary_section_label():
             label = QLabel()
-            title_font = label.font()
-            if title_font.pointSizeF() > 0:
-                title_font.setPointSizeF(title_font.pointSizeF() + 1.0)
-            else:
-                title_font.setPixelSize(max(13, title_font.pixelSize() + 1))
-            label.setFont(title_font)
+            label.setFont(self.add_title_label.font())
             label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
             return label
-
-        self.add_title_label = make_primary_section_label()
         self.settings_btn = QPushButton()
         self.settings_btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self.settings_btn.clicked.connect(self.open_settings)
@@ -5451,6 +5501,7 @@ class Main(QMainWindow):
         # Przywróć ostatni rozmiar, stan i (tam, gdzie menedżer okien na to
         # pozwala) pozycję głównego okna dopiero po zbudowaniu całego UI.
         self.restore_window_geometry()
+        QTimer.singleShot(0, self.restore_view_state)
 
     def apply_compact_control_metrics(self):
         """Use compact metrics, with a slightly stronger primary Add button."""
@@ -6378,12 +6429,20 @@ class Main(QMainWindow):
         except Exception:
             pass
 
+    def restore_view_state(self):
+        try:
+            self.scroll.verticalScrollBar().setValue(int(self.cfg.get("main_scroll_y", 0)))
+        except Exception:
+            pass
+
     def save_window_geometry(self):
         """Persist only width/height; placement remains the window manager's job."""
         try:
             size = self.normalGeometry().size() if (self.isMaximized() or self.isFullScreen()) else self.size()
             self.cfg["window_width"] = int(size.width())
             self.cfg["window_height"] = int(size.height())
+            if hasattr(self, "scroll"):
+                self.cfg["main_scroll_y"] = int(self.scroll.verticalScrollBar().value())
             # Drop obsolete position/geometry keys if they came from older builds.
             self.cfg.pop("window_geometry", None)
             self.cfg.pop("window_x", None)
@@ -7147,7 +7206,8 @@ class Main(QMainWindow):
         self.select.setChecked(False)
         self.omit.setChecked(False)
         self.nums.clear()
-        self.dest.setText(self.cfg.get("default_subfolder", ""))
+        if not self.cfg.get("remember_path_after_add", False):
+            self.dest.setText(self.cfg.get("default_subfolder", ""))
         self.url.setFocus()
         self.update_pl()
 
@@ -7338,9 +7398,24 @@ class Main(QMainWindow):
         if self.busy:
             return
 
+        # Domyślnie gotowe pozycje zostają gotowe i kolejne kliknięcie
+        # „Pobierz wszystko” uruchamia tylko nowe/oczekujące wpisy. Użytkownik
+        # może wyłączyć tę ochronę w Ustawieniach, jeśli świadomie chce
+        # pobrać gotowe pozycje ponownie.
+        if not self.cfg.get("skip_completed_queue", True):
+            for it in self.queue:
+                if self.item_state.get(it.uid) == "done":
+                    self.item_state[it.uid] = "waiting"
+                    row = self.row_for_uid(it.uid)
+                    cell = self.table.item(row, 6) if row >= 0 else None
+                    if cell is not None:
+                        cell.setText(tr(self.lang, "waiting"))
+                        cell.setToolTip("")
+
         waiting = [it for it in self.queue if self.item_state.get(it.uid, "waiting") == "waiting"]
         if not waiting:
-            QMessageBox.information(self, APP_NAME, tr(self.lang, "empty_queue"))
+            key = "no_new_queue_items" if self.queue else "empty_queue"
+            QMessageBox.information(self, APP_NAME, tr(self.lang, key))
             return
 
         if not tool_available("yt-dlp") or not tool_available("ffmpeg"):
@@ -7697,6 +7772,10 @@ def runtime_self_test():
         if not CFG_FILE.exists():
             if defaults.get("language") != "en":
                 errors.append(f"fresh default language is not English: {defaults.get('language')!r}")
+            if defaults.get("skip_completed_queue") is not True:
+                errors.append("fresh default should skip completed queue items")
+            if defaults.get("remember_path_after_add") is not False:
+                errors.append("fresh default should not remember the entered path after add")
             expected_rows = (4, 5, 3, 4, 3, 4)
             got_rows = (
                 defaults.get("queue_rows_min"), defaults.get("queue_rows_max"),
@@ -7803,14 +7882,14 @@ def runtime_self_test():
     try:
         fake_source = Path("/tmp/YT-Downloader-0.4.45-x86_64.AppImage")
         target = _release_appimage_target(fake_source, {
-            "version": "0.4.46",
-            "asset_name": "YT-Downloader-0.4.46-x86_64.AppImage",
+            "version": "0.4.47",
+            "asset_name": "YT-Downloader-0.4.47-x86_64.AppImage",
         })
-        if target.name != "YT-Downloader-0.4.46-x86_64.AppImage":
+        if target.name != "YT-Downloader-0.4.47-x86_64.AppImage":
             errors.append(f"AppImage update target naming is wrong: {target.name!r}")
         custom = _release_appimage_target(
             Path("/tmp/YT-Downloader.AppImage"),
-            {"version": "0.4.46", "asset_name": "YT-Downloader-0.4.46-x86_64.AppImage"},
+            {"version": "0.4.47", "asset_name": "YT-Downloader-0.4.47-x86_64.AppImage"},
         )
         if custom.name != "YT-Downloader.AppImage":
             errors.append(f"custom AppImage filename was not preserved: {custom.name!r}")
