@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.42
+
+- Fixed GitHub update checks/downloads in AppImage by bundling a trusted CA certificate store.
+- GitHub HTTPS now uses an explicit certifi-backed TLS context instead of depending on distro-specific CA paths.
+- Added an AppImage runtime self-test that verifies the bundled CA bundle is present.
+
 ## 0.4.41
 
 - Added Standard/DRC source-audio variants for M4A/AAC and Opus.

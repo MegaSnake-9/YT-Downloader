@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "yt-downloader-gui"
-version = "0.4.41"
+version = "0.4.42"
 description = "A Qt GUI for yt-dlp focused on convenient audio and video downloading."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,7 +13,8 @@ authors = [
   { name = "MegaSnake-9" }
 ]
 dependencies = [
-  "PySide6>=6.7"
+  "PySide6>=6.7",
+  "certifi>=2024.8.30"
 ]
 keywords = ["yt-dlp", "youtube", "downloader", "qt", "pyside6"]
 classifiers = [

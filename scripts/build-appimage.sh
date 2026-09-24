@@ -35,7 +35,7 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" "$APPDIR/usr/share/applications" \
 
 python3 -m venv "$VENV"
 "$VENV/bin/python" -m pip install --upgrade pip wheel
-"$VENV/bin/python" -m pip install 'PyInstaller>=6.15,<7' 'PySide6>=6.7,<7'
+"$VENV/bin/python" -m pip install 'PyInstaller>=6.15,<7' 'PySide6>=6.7,<7' 'certifi>=2024.8.30'
 
 # Freeze the GUI and Qt/PySide6 into a relocatable onedir application.
 "$VENV/bin/pyinstaller" \
@@ -48,6 +48,7 @@ python3 -m venv "$VENV"
     --workpath "$PYI_WORK" \
     --specpath "$BUILD_ROOT" \
     --add-data "$ROOT/assets/yt-downloader.png:." \
+    --collect-data certifi \
     "$ROOT/src/yt_downloader.py"
 
 cp -a "$PYI_DIST/yt-downloader" "$APPDIR/usr/lib/yt-downloader"

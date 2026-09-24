@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import hashlib
+import ssl
 import json
 import os
 import re
@@ -19,6 +20,11 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+try:
+    import certifi
+except ImportError:
+    certifi = None
+
 from PySide6.QtCore import QByteArray, QEvent, QObject, QThread, Signal, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
@@ -30,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.41"
+VERSION = "0.4.42"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -3888,6 +3894,23 @@ def _version_tuple(value):
     return tuple(int(x) for x in nums[:4]) or (0,)
 
 
+def github_ssl_context():
+    """Return a TLS context that works reliably inside the frozen AppImage.
+
+    A PyInstaller-frozen Python may not know the host distribution's CA bundle
+    location.  AppImage builds therefore bundle certifi and use its Mozilla CA
+    store for GitHub HTTPS.  Non-frozen/source builds can still fall back to
+    the system trust store if certifi is not installed.
+    """
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
+
+
+def github_urlopen(request, timeout):
+    return urlopen(request, timeout=timeout, context=github_ssl_context())
+
+
 def github_latest_release(timeout=10):
     req = Request(
         GITHUB_RELEASES_API,
@@ -3897,7 +3920,7 @@ def github_latest_release(timeout=10):
         },
     )
     try:
-        with urlopen(req, timeout=timeout) as response:
+        with github_urlopen(req, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         if exc.code == 404:
@@ -3935,7 +3958,7 @@ def install_appimage_release(release):
     backup = source.with_name(source.name + ".old")
     req = Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
     try:
-        with urlopen(req, timeout=60) as response, tmp.open("wb") as out:
+        with github_urlopen(req, timeout=60) as response, tmp.open("wb") as out:
             shutil.copyfileobj(response, out)
         if tmp.stat().st_size < 1024 * 1024:
             raise RuntimeError("downloaded AppImage is unexpectedly small")
@@ -7542,6 +7565,20 @@ def runtime_self_test():
                 errors.append("build_cmd created destination during command preview")
     except Exception as exc:
         errors.append(f"side-effect-free command preview test failed: {exc!r}")
+
+    try:
+        ctx = github_ssl_context()
+        if ctx is None:
+            errors.append("GitHub SSL context was not created")
+        if getattr(sys, "frozen", False):
+            if certifi is None:
+                errors.append("certifi is missing from frozen AppImage")
+            else:
+                ca_file = Path(certifi.where())
+                if not ca_file.is_file():
+                    errors.append(f"bundled certifi CA bundle not found: {ca_file}")
+    except Exception as exc:
+        errors.append(f"GitHub SSL context self-test failed: {exc!r}")
 
     if PORTABLE and os.environ.get("APPIMAGE"):
         for tool in ("yt-dlp", "ffmpeg", "ffprobe", "deno"):
