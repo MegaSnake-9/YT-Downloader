@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.40
+
+- Fix `Open default folder` in AppImage by using host `xdg-open`/`gio` with a sanitized subprocess environment.
+- Make `Download all` and `Stop` match the larger primary `Add` action and right-side spacing.
+- Add portable Linux shortcut controls in Settings for the application menu and desktop, plus shortcut removal.
+- Translate Settings `Save` / `Cancel` explicitly instead of relying on bundled Qt translations.
+- Rework the non-native folder picker into a left-to-right tile grid that wraps by rows and scrolls vertically.
+- Make yt-dlp command preview side-effect free; typing `Echo` no longer creates `E`, `Ec`, `Ech`, `Echo` folders.
+- Create the destination directory only when a real download starts.
+- Extend the AppImage self-test to guard against destination creation during command preview.
+
 ## 0.4.39
 
 - Fix AppImage/KWallet integration at the PyInstaller subprocess boundary.

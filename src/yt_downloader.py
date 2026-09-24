@@ -10,24 +10,25 @@ import subprocess
 import sys
 import time
 import threading
+import tempfile
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
-from PySide6.QtCore import QByteArray, QEvent, QObject, QThread, Signal, QTimer, QUrl, Qt
+from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QThread, Signal, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QFrame, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QFrame, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox,
     QPushButton, QPlainTextEdit, QProgressBar, QScrollArea, QSizePolicy, QSpinBox, QStyle, QStyleOptionComboBox, QStylePainter, QTabWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.39"
+VERSION = "0.4.40"
 CONTROL_HEIGHT = 28
 
 
@@ -618,7 +619,17 @@ TR = {
         "stats_idle_eta": "—",
         "save": "Zapisz",
         "cancel": "Anuluj",
+        "open": "Otwórz",
         "close": "Zamknij",
+        "shortcuts_group": "Skróty — Linux portable",
+        "shortcuts_note": "Opcjonalna integracja. Program i dane nadal pozostają w folderze portable.",
+        "shortcut_menu": "Dodaj do menu aplikacji",
+        "shortcut_desktop": "Dodaj skrót na pulpit",
+        "shortcut_remove": "Usuń skróty",
+        "shortcut_menu_created": "Dodano skrót do menu aplikacji.",
+        "shortcut_desktop_created": "Dodano skrót na pulpit.",
+        "shortcut_removed": "Usunięto skróty YT-Downloadera.",
+        "shortcut_failed": "Nie udało się zmienić skrótów: {error}",
         "profile_hint": "opcjonalny katalog profilu; wymagany dla Opera GX",
         "path_hint": "podkatalog albo pełna ścieżka",
         "interface_group": "Interfejs",
@@ -901,7 +912,17 @@ TR = {
         "stats_idle_eta": "—",
         "save": "Save",
         "cancel": "Cancel",
+        "open": "Open",
         "close": "Close",
+        "shortcuts_group": "Shortcuts — Linux portable",
+        "shortcuts_note": "Optional integration. The app and its data still stay in the portable folder.",
+        "shortcut_menu": "Add to application menu",
+        "shortcut_desktop": "Add desktop shortcut",
+        "shortcut_remove": "Remove shortcuts",
+        "shortcut_menu_created": "Application-menu shortcut created.",
+        "shortcut_desktop_created": "Desktop shortcut created.",
+        "shortcut_removed": "YT-Downloader shortcuts removed.",
+        "shortcut_failed": "Could not change shortcuts: {error}",
         "profile_hint": "optional profile directory; required for Opera GX",
         "path_hint": "subfolder or absolute path",
         "interface_group": "Interface",
@@ -970,6 +991,185 @@ TR = {
 def tr(lang, key, **kwargs):
     text = TR.get(lang, TR["pl"]).get(key, key)
     return text.format(**kwargs) if kwargs else text
+
+
+def choose_directory_dialog(parent, title, start_dir, lang):
+    """Qt folder picker with row-major tiles and vertical scrolling."""
+    dialog = QFileDialog(parent, title, str(start_dir))
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+    dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+    dialog.setFileMode(QFileDialog.FileMode.Directory)
+    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
+    dialog.setViewMode(QFileDialog.ViewMode.List)
+
+    view = dialog.findChild(QListView, "listView")
+    if view is not None:
+        view.setViewMode(QListView.ViewMode.IconMode)
+        view.setFlow(QListView.Flow.LeftToRight)
+        view.setWrapping(True)
+        view.setResizeMode(QListView.ResizeMode.Adjust)
+        view.setMovement(QListView.Movement.Static)
+        view.setUniformItemSizes(True)
+        view.setWordWrap(True)
+        view.setIconSize(QSize(36, 36))
+        view.setGridSize(QSize(150, 72))
+        view.setSpacing(3)
+        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+    button_box = dialog.findChild(QDialogButtonBox)
+    if button_box is not None:
+        for button in button_box.buttons():
+            role = button_box.buttonRole(button)
+            if role in (
+                QDialogButtonBox.ButtonRole.AcceptRole,
+                QDialogButtonBox.ButtonRole.YesRole,
+            ):
+                button.setText(tr(lang, "open"))
+            elif role in (
+                QDialogButtonBox.ButtonRole.RejectRole,
+                QDialogButtonBox.ButtonRole.NoRole,
+            ):
+                button.setText(tr(lang, "cancel"))
+        apply_uniform_dialog_buttons(dialog)
+
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        return ""
+    selected = dialog.selectedFiles()
+    return selected[0] if selected else ""
+
+
+def open_local_folder(path):
+    """Open a folder through the host desktop, including from AppImage."""
+    target = Path(path).expanduser().resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        os.startfile(str(target))
+        return True
+
+    env = external_subprocess_env()
+    host_path = env.get("PATH", os.environ.get("PATH", ""))
+    for name, args in (("xdg-open", [str(target)]), ("gio", ["open", str(target)])):
+        exe = shutil.which(name, path=host_path)
+        if not exe:
+            continue
+        try:
+            subprocess.Popen(
+                [exe, *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                start_new_session=True,
+            )
+            return True
+        except Exception:
+            pass
+    return QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
+
+def _portable_launcher_path():
+    """Return a stable portable launcher/AppImage path for .desktop files."""
+    if os.name == "nt":
+        return None
+    if _APPIMAGE_PATH:
+        p = Path(_APPIMAGE_PATH).expanduser().resolve()
+        if p.is_file():
+            return p
+    if _PORTABLE_ROOT_ENV:
+        root = Path(_PORTABLE_ROOT_ENV).expanduser().resolve()
+        for name in ("YT-Downloader.AppImage", "YT-Downloader"):
+            p = root / name
+            if p.is_file():
+                return p
+    return None
+
+
+def _desktop_directory():
+    env = external_subprocess_env()
+    host_path = env.get("PATH", os.environ.get("PATH", ""))
+    xdg_user_dir = shutil.which("xdg-user-dir", path=host_path)
+    if xdg_user_dir:
+        try:
+            proc = subprocess.run(
+                [xdg_user_dir, "DESKTOP"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                env=env,
+            )
+            value = (proc.stdout or "").strip()
+            if proc.returncode == 0 and value:
+                return Path(value).expanduser()
+        except Exception:
+            pass
+    for candidate in (Path.home() / "Pulpit", Path.home() / "Desktop"):
+        if candidate.is_dir():
+            return candidate
+    return Path.home() / "Desktop"
+
+
+def _desktop_exec_quote(value):
+    text = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+    return f'"{text}"'
+
+
+def _portable_shortcut_targets():
+    return {
+        "menu": Path.home() / ".local" / "share" / "applications" / "yt-downloader.desktop",
+        "desktop": _desktop_directory() / "YT-Downloader.desktop",
+    }
+
+
+def create_portable_shortcut(kind):
+    if os.name == "nt":
+        raise RuntimeError("Linux shortcuts are not available on Windows")
+    launcher = _portable_launcher_path()
+    if launcher is None:
+        raise RuntimeError("portable AppImage/launcher path is unavailable")
+    if DATA_ROOT is None:
+        raise RuntimeError("portable data directory is unavailable")
+
+    integration_dir = DATA_ROOT / "integration"
+    integration_dir.mkdir(parents=True, exist_ok=True)
+    icon_target = integration_dir / "yt-downloader.png"
+    if APP_ICON.is_file():
+        shutil.copy2(APP_ICON, icon_target)
+
+    targets = _portable_shortcut_targets()
+    if kind not in targets:
+        raise ValueError(kind)
+    target = targets[kind]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    desktop = "\n".join([
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=YT-Downloader",
+        "Comment=GUI downloader for yt-dlp",
+        f"Exec={_desktop_exec_quote(launcher)}",
+        f"Icon={icon_target}",
+        "Terminal=false",
+        "Categories=AudioVideo;Network;",
+        "StartupNotify=true",
+        "",
+    ])
+    target.write_text(desktop, encoding="utf-8")
+    target.chmod(0o755)
+    return target
+
+
+def remove_portable_shortcuts():
+    for target in _portable_shortcut_targets().values():
+        try:
+            target.unlink(missing_ok=True)
+        except Exception:
+            pass
+    if DATA_ROOT is not None:
+        integration_dir = DATA_ROOT / "integration"
+        try:
+            (integration_dir / "yt-downloader.png").unlink(missing_ok=True)
+            integration_dir.rmdir()
+        except Exception:
+            pass
 
 BROWSERS = [("none", "no_login")]
 if os.name == "nt":
@@ -2195,8 +2395,10 @@ def subtitle_args(it):
 
 
 def build_cmd(it, cfg, override=None, source_url=None):
+    # Command construction must be side-effect free. The GUI calls build_cmd()
+    # while the user types in order to refresh the advanced command preview.
+    # Creating the directory here used to produce E / Ec / Ech / Echo.
     d = dest_path(it.destination, cfg)
-    d.mkdir(parents=True, exist_ok=True)
 
     cmd = [
         tool_executable("yt-dlp"), "--ignore-config", "--newline", "--windows-filenames",
@@ -3276,6 +3478,14 @@ class Worker(QObject):
                     if self.is_skipped(it.uid):
                         continue
 
+                    # Create the final destination only when a real download
+                    # is about to start. Previewing/typing a path must not touch
+                    # the filesystem.
+                    try:
+                        dest_path(it.destination, self.cfg).mkdir(parents=True, exist_ok=True)
+                    except OSError as exc:
+                        raise AppError("E08", tr(lang, "e08")) from exc
+
                     source_override = None
                     rc, dlog = self.run_proc(build_cmd(it, self.cfg, override, source_url=source_override))
                     logs.append("=== DOWNLOAD — ATTEMPT 1 ===\n" + dlog)
@@ -3801,6 +4011,26 @@ class Settings(QDialog):
         interface_form.addRow(rows_box)
         main.addWidget(interface_box)
 
+        if os.name != "nt" and PORTABLE:
+            shortcuts_box = QGroupBox(tr(self.lang, "shortcuts_group"))
+            shortcuts_layout = QVBoxLayout(shortcuts_box)
+            shortcuts_note = QLabel(tr(self.lang, "shortcuts_note"))
+            shortcuts_note.setWordWrap(True)
+            shortcuts_layout.addWidget(shortcuts_note)
+            shortcuts_row = QHBoxLayout()
+            self.shortcut_menu_btn = QPushButton(tr(self.lang, "shortcut_menu"))
+            self.shortcut_desktop_btn = QPushButton(tr(self.lang, "shortcut_desktop"))
+            self.shortcut_remove_btn = QPushButton(tr(self.lang, "shortcut_remove"))
+            self.shortcut_menu_btn.clicked.connect(lambda: self.change_shortcut("menu"))
+            self.shortcut_desktop_btn.clicked.connect(lambda: self.change_shortcut("desktop"))
+            self.shortcut_remove_btn.clicked.connect(lambda: self.change_shortcut("remove"))
+            shortcuts_row.addWidget(self.shortcut_menu_btn)
+            shortcuts_row.addWidget(self.shortcut_desktop_btn)
+            shortcuts_row.addWidget(self.shortcut_remove_btn)
+            shortcuts_row.addStretch(1)
+            shortcuts_layout.addLayout(shortcuts_row)
+            main.addWidget(shortcuts_box)
+
         update_box = QGroupBox(tr(self.lang, "updates_group"))
         update_row = QHBoxLayout(update_box)
         self.check_versions_btn = QPushButton(tr(self.lang, "check_components"))
@@ -3820,6 +4050,12 @@ class Settings(QDialog):
         )
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        cancel_button = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+        if save_button is not None:
+            save_button.setText(tr(self.lang, "save"))
+        if cancel_button is not None:
+            cancel_button.setText(tr(self.lang, "cancel"))
 
         outer = QVBoxLayout(self)
         outer.addWidget(scroll)
@@ -3832,6 +4068,23 @@ class Settings(QDialog):
         # Rozmiar okna Ustawień jest preferencją interfejsu, więc zapisujemy
         # go także po Anuluj — bez zapisywania zmian formularza.
         self.finished.connect(self.remember_window_size)
+
+    def change_shortcut(self, action):
+        try:
+            if action == "remove":
+                remove_portable_shortcuts()
+                message = tr(self.lang, "shortcut_removed")
+            else:
+                create_portable_shortcut(action)
+                message = tr(
+                    self.lang,
+                    "shortcut_menu_created" if action == "menu" else "shortcut_desktop_created",
+                )
+            QMessageBox.information(self, APP_NAME, message)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, APP_NAME, tr(self.lang, "shortcut_failed", error=str(exc))
+            )
 
     def remember_window_size(self, _result=None):
         try:
@@ -3926,21 +4179,21 @@ class Settings(QDialog):
         self.cookie_file_remove_btn.setEnabled(False)
 
     def choose_dir(self):
-        p = QFileDialog.getExistingDirectory(
+        p = choose_directory_dialog(
             self,
             tr(self.lang, "choose_folder"),
             self.dir.text() or str(Path.home()),
-            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog
+            self.lang,
         )
         if p:
             self.dir.setText(p)
 
     def choose_profile(self):
-        p = QFileDialog.getExistingDirectory(
+        p = choose_directory_dialog(
             self,
             tr(self.lang, "choose_profile_dialog"),
             self.profile.text() or str(Path.home()),
-            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog
+            self.lang,
         )
         if p:
             self.profile.setText(p)
@@ -4585,11 +4838,20 @@ class Main(QMainWindow):
         queue_pane_layout.addLayout(stats_row)
 
         ar = QHBoxLayout()
+        ar.setContentsMargins(0, 2, 14, 0)
         self.stop = QPushButton()
         self.stop.setEnabled(False)
         self.stop.clicked.connect(self.stop_dl)
         self.download_all = QPushButton()
         self.download_all.clicked.connect(self.start_dl)
+        for action_button in (self.stop, self.download_all):
+            action_button.setMinimumWidth(78)
+            action_font = action_button.font()
+            if action_font.pointSizeF() > 0:
+                action_font.setPointSizeF(action_font.pointSizeF() + 1.0)
+            else:
+                action_font.setPixelSize(max(13, action_font.pixelSize() + 1))
+            action_button.setFont(action_font)
         ar.addStretch()
         ar.addWidget(self.stop)
         ar.addWidget(self.download_all)
@@ -4681,8 +4943,9 @@ class Main(QMainWindow):
         # Dodaj jest główną akcją formularza, więc może być odrobinę większy
         # niż pomocnicze przyciski 28 px. Robimy to po uniformizacji, aby
         # apply_uniform_control_metrics() nie nadpisało tej wysokości.
-        self.add_btn.setFixedHeight(32)
-        self.add_btn.setMinimumWidth(78)
+        for button in (self.add_btn, self.stop, self.download_all):
+            button.setFixedHeight(32)
+            button.setMinimumWidth(78)
 
     @property
     def lang(self):
@@ -5805,11 +6068,11 @@ class Main(QMainWindow):
         cur = dest_path(self.dest.text(), self.cfg)
         start = cur if cur.exists() else root
 
-        p = QFileDialog.getExistingDirectory(
+        p = choose_directory_dialog(
             self,
             tr(self.lang, "choose_destination"),
             str(start),
-            QFileDialog.Option.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog
+            self.lang,
         )
         if p:
             pp = Path(p).resolve()
@@ -6453,8 +6716,13 @@ class Main(QMainWindow):
 
     def open_dir(self):
         p = Path(self.cfg["default_download_dir"]).expanduser()
-        p.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
+        try:
+            if not open_local_folder(p):
+                raise RuntimeError(str(p))
+        except Exception as exc:
+            QMessageBox.warning(
+                self, APP_NAME, f"{tr(self.lang, 'open_default')}: {exc}"
+            )
 
     def set_busy(self, busy):
         self.busy = busy
@@ -6887,6 +7155,31 @@ def runtime_self_test():
                     os.environ["KDE_SESSION_VERSION"] = old_kde
         except Exception as exc:
             errors.append(f"cookies_args(brave) failed: {exc!r}")
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "language": "en",
+                "default_download_dir": tmp,
+                "cookies_browser": "none",
+                "cookies_file_enabled": False,
+                "no_overwrites": True,
+                "embed_metadata": True,
+                "embed_thumbnail": True,
+            }
+            preview_item = Item(
+                playlist=False,
+                destination="Echo",
+                url="https://www.youtube.com/watch?v=VIDEO_ID",
+                media="audio",
+                fmt="m4a",
+                quality="128",
+            )
+            build_cmd(preview_item, cfg)
+            if (Path(tmp) / "Echo").exists():
+                errors.append("build_cmd created destination during command preview")
+    except Exception as exc:
+        errors.append(f"side-effect-free command preview test failed: {exc!r}")
 
     if PORTABLE and os.environ.get("APPIMAGE"):
         for tool in ("yt-dlp", "ffmpeg", "ffprobe", "deno"):
