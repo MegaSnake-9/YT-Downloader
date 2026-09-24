@@ -8,7 +8,8 @@ YT-Downloader is a desktop GUI for **yt-dlp** built with **Python + PySide6/Qt**
 
 - Audio-only and video downloads
 - Playlist support with item selection/skipping
-- M4A/AAC, MP3 and other yt-dlp/FFmpeg-backed formats
+- M4A/AAC, Opus, MP3 and other yt-dlp/FFmpeg-backed formats
+- Standard/DRC source-audio selection for M4A/AAC and Opus
 - Metadata and embedded artwork
 - Browser-cookie support for content that requires a signed-in YouTube session
 - Saved presets
@@ -75,7 +76,7 @@ A self-contained x86_64 AppImage can be built with:
 ./scripts/build-appimage.sh
 ```
 
-GitHub Actions also builds it automatically on relevant pushes to `main` and allows a manual build from the **Actions** tab. The resulting AppImage is uploaded as a workflow artifact.
+GitHub Actions also builds it automatically on relevant pushes to `main` and allows a manual build from the **Actions** tab. The resulting AppImage is uploaded as a workflow artifact. Tags matching `v*` can publish the AppImage as a GitHub Release, which the in-app updater can use without depending on a particular Linux distribution.
 
 See [`packaging/appimage/README.md`](packaging/appimage/README.md).
 

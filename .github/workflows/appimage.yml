@@ -1,9 +1,13 @@
 name: Build AppImage
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - "src/**"
       - "assets/**"
@@ -68,3 +72,12 @@ jobs:
           path: dist/YT-Downloader-*-x86_64.AppImage
           if-no-files-found: error
           compression-level: 0
+
+      - name: Publish tagged GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
+          gh release create "$GITHUB_REF_NAME" "$APPIMAGE" \
+            --title "$GITHUB_REF_NAME" --generate-notes

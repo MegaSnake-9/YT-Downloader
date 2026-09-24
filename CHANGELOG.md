@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.41
+
+- Added Standard/DRC source-audio variants for M4A/AAC and Opus.
+- Added DRC-to-standard fallback status when a requested DRC stream is unavailable.
+- Marked approximate M4A/Opus bitrates with `~`.
+- Added a Variant column to Check formats and made summary prefer non-DRC streams.
+- Fresh installs now default to English and use the refined UI geometry/row limits.
+- Switched folder selection to the desktop-native directory picker.
+- Replaced Arch-specific updating with GitHub Releases/AppImage updating.
+- Enlarged the main Add to queue / Queue / History / Log section titles.
+
 ## 0.4.40
 
 - Fix `Open default folder` in AppImage by using host `xdg-open`/`gio` with a sanitized subprocess environment.

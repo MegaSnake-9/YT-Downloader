@@ -16,20 +16,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
-from PySide6.QtCore import QByteArray, QEvent, QObject, QSize, QThread, Signal, QTimer, QUrl, Qt
+from PySide6.QtCore import QByteArray, QEvent, QObject, QThread, Signal, QTimer, QUrl, Qt
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
-    QFrame, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QListView, QMainWindow, QMenu, QMessageBox,
+    QFrame, QHeaderView, QInputDialog, QLabel, QLayout, QLineEdit, QMainWindow, QMenu, QMessageBox,
     QPushButton, QPlainTextEdit, QProgressBar, QScrollArea, QSizePolicy, QSpinBox, QStyle, QStyleOptionComboBox, QStylePainter, QTabWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.40"
+VERSION = "0.4.41"
 CONTROL_HEIGHT = 28
+GITHUB_REPO = "MegaSnake-9/YT-Downloader"
+GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+GITHUB_RELEASES_URL = f"https://github.com/{GITHUB_REPO}/releases"
 
 
 class NoWheelComboBox(QComboBox):
@@ -523,11 +528,19 @@ TR = {
         "choose_folder": "Wybierz folder",
         "choose_destination": "Wybierz folder docelowy",
         "choose_profile_dialog": "Wybierz profil",
-        "audio_quality_tip": "Bitrate ma znaczenie tylko przy ponownym kodowaniu MP3/Opus. Nie poprawi jakości źródła z YouTube.",
+        "audio_quality_tip": "M4A/Opus pobierają źródłowy strumień YouTube bez zbędnego ponownego kodowania. Podane bitrate są wartościami przybliżonymi.",
         "mp3_quality_tip": "MP3: VBR używa poziomów LAME V0/V2/V4, a tryb Bitrate ustawia 320/256/192/128 kb/s. Ponowne kodowanie nie poprawi jakości źródła z YouTube.",
-        "m4a_quality_tip": "M4A/AAC: Najlepsza próbuje 256 kb/s z YouTube Music Premium i wraca do 128 kb/s, jeśli 256 nie jest dostępne. 256 kb/s wymaga dostępu Premium/cookies; 128 kb/s wymusza zwykły strumień AAC.",
-        "premium_256": "256 kb/s (Premium)",
-        "standard_128": "128 kb/s",
+        "m4a_quality_tip": "M4A/AAC: Premium/high (~256 kb/s) wymaga dostępu Premium/cookies. Standard to około 128 kb/s. Wariant DRC ma fallback do standardowego strumienia, jeśli DRC dla wybranej jakości nie istnieje.",
+        "premium_256": "Premium / high (~256 kb/s)",
+        "standard_128": "Standard (~128 kb/s)",
+        "audio_variant": "Wariant:",
+        "audio_variant_standard": "Standardowy",
+        "audio_variant_drc": "DRC",
+        "drc_fallback_status": "Gotowe • standard (brak DRC)",
+        "drc_fallback_desc": "Wybrano DRC, ale dla tej jakości DRC nie było dostępne — pobrano standardowy strumień.",
+        "format_variant": "Wariant",
+        "format_variant_standard": "Standardowy",
+        "format_variant_drc": "DRC",
         "format_checker": "Sprawdź formaty:",
         "format_checker_paste_hint": "wklej link do sprawdzenia",
         "check_formats": "Sprawdź formaty",
@@ -685,13 +698,18 @@ TR = {
         "clear_history_confirm": "Usunąć zapisaną historię pobierania?",
         "history_empty": "Brak zapisanej historii pobierania.",
         "queue_restored": "Przywrócono zapisaną kolejkę: {n} pozycji.",
-        "updates_group": "Aktualizacje — Arch Linux",
-        "check_components": "Sprawdź wersje",
-        "update_components": "Aktualizuj yt-dlp / FFmpeg…",
-        "components_versions": "Zainstalowane wersje:\n{versions}",
-        "update_arch_warning": "Arch Linux nie wspiera częściowych aktualizacji. Ta operacja uruchomi pacman -Syu i może zaktualizować także inne pakiety systemu, nie tylko yt-dlp/FFmpeg. Kontynuować?",
-        "update_started": "Uruchomiono aktualizację przez pacman. Po zaakceptowaniu okna uprawnień poczekaj na zakończenie procesu.",
-        "update_failed": "Nie udało się uruchomić aktualizacji: {error}",
+        "updates_group": "Aktualizacje",
+        "check_components": "Sprawdź aktualizacje",
+        "update_components": "Aktualizuj z GitHuba…",
+        "current_version": "Bieżąca wersja: {version}",
+        "latest_version": "Najnowsza wersja: {version}",
+        "update_available": "Dostępna jest wersja {version}.",
+        "update_none": "Masz najnowszą wersję ({version}).",
+        "update_no_release": "Nie znaleziono publicznego wydania GitHub. Aktualizacje z programu zaczną działać po opublikowaniu Release.",
+        "update_not_appimage": "Automatyczna podmiana programu działa w wersji AppImage. Otworzono stronę wydań GitHub.",
+        "update_confirm": "Pobrać i zainstalować YT-Downloader {version}? Folder data/ z ustawieniami i historią nie zostanie zmieniony.",
+        "update_downloaded": "Zainstalowano wersję {version}. Zamknij i uruchom ponownie YT-Downloader.",
+        "update_failed": "Aktualizacja nie powiodła się: {error}",
     },
     "en": {
         "settings": "⚙ Settings",
@@ -816,11 +834,19 @@ TR = {
         "choose_folder": "Choose folder",
         "choose_destination": "Choose destination folder",
         "choose_profile_dialog": "Choose profile",
-        "audio_quality_tip": "Bitrate matters only when re-encoding MP3/Opus. It cannot improve the source quality from YouTube.",
+        "audio_quality_tip": "M4A/Opus use the original YouTube audio stream without unnecessary re-encoding. Shown bitrates are approximate.",
         "mp3_quality_tip": "MP3: VBR uses LAME V0/V2/V4 quality levels, while Bitrate sets 320/256/192/128 kb/s. Re-encoding cannot improve the YouTube source quality.",
-        "m4a_quality_tip": "M4A/AAC: Best tries 256 kb/s from YouTube Music Premium and falls back to 128 kb/s when 256 is unavailable. 256 kb/s requires Premium/cookies; 128 kb/s forces the standard AAC stream.",
-        "premium_256": "256 kb/s (Premium)",
-        "standard_128": "128 kb/s",
+        "m4a_quality_tip": "M4A/AAC: Premium/high (~256 kb/s) requires Premium access/cookies. Standard is about 128 kb/s. DRC falls back to the standard stream when DRC is unavailable for the selected quality.",
+        "premium_256": "Premium / high (~256 kb/s)",
+        "standard_128": "Standard (~128 kb/s)",
+        "audio_variant": "Variant:",
+        "audio_variant_standard": "Standard",
+        "audio_variant_drc": "DRC",
+        "drc_fallback_status": "Done • standard (DRC unavailable)",
+        "drc_fallback_desc": "DRC was requested, but DRC was unavailable for this quality — the standard stream was downloaded.",
+        "format_variant": "Variant",
+        "format_variant_standard": "Standard",
+        "format_variant_drc": "DRC",
         "format_checker": "Check formats:",
         "format_checker_paste_hint": "paste a link to inspect",
         "check_formats": "Check formats",
@@ -978,13 +1004,18 @@ TR = {
         "clear_history_confirm": "Delete saved download history?",
         "history_empty": "No saved download history.",
         "queue_restored": "Restored saved queue: {n} items.",
-        "updates_group": "Updates — Arch Linux",
-        "check_components": "Check versions",
-        "update_components": "Update yt-dlp / FFmpeg…",
-        "components_versions": "Installed versions:\n{versions}",
-        "update_arch_warning": "Arch Linux does not support partial upgrades. This operation runs pacman -Syu and may update other system packages, not only yt-dlp/FFmpeg. Continue?",
-        "update_started": "Started the pacman update. After accepting the authorization dialog, wait for the process to finish.",
-        "update_failed": "Could not start the update: {error}",
+        "updates_group": "Updates",
+        "check_components": "Check for updates",
+        "update_components": "Update from GitHub…",
+        "current_version": "Current version: {version}",
+        "latest_version": "Latest version: {version}",
+        "update_available": "Version {version} is available.",
+        "update_none": "You already have the latest version ({version}).",
+        "update_no_release": "No public GitHub Release was found. In-app updates will work after a Release is published.",
+        "update_not_appimage": "Automatic replacement is available for the AppImage build. The GitHub Releases page was opened.",
+        "update_confirm": "Download and install YT-Downloader {version}? Your data/ folder with settings and history will not be changed.",
+        "update_downloaded": "Version {version} was installed. Close and reopen YT-Downloader.",
+        "update_failed": "Update failed: {error}",
     },
 }
 
@@ -994,49 +1025,60 @@ def tr(lang, key, **kwargs):
 
 
 def choose_directory_dialog(parent, title, start_dir, lang):
-    """Qt folder picker with row-major tiles and vertical scrolling."""
-    dialog = QFileDialog(parent, title, str(start_dir))
-    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
-    dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
-    dialog.setFileMode(QFileDialog.FileMode.Directory)
-    dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptOpen)
-    dialog.setViewMode(QFileDialog.ViewMode.List)
+    """Use a host-native folder chooser whenever possible.
 
-    view = dialog.findChild(QListView, "listView")
-    if view is not None:
-        view.setViewMode(QListView.ViewMode.IconMode)
-        view.setFlow(QListView.Flow.LeftToRight)
-        view.setWrapping(True)
-        view.setResizeMode(QListView.ResizeMode.Adjust)
-        view.setMovement(QListView.Movement.Static)
-        view.setUniformItemSizes(True)
-        view.setWordWrap(True)
-        view.setIconSize(QSize(36, 36))
-        view.setGridSize(QSize(150, 72))
-        view.setSpacing(3)
-        view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    On KDE prefer kdialog, on GNOME-like desktops prefer zenity when present.
+    This lets the AppImage use the desktop's own file chooser instead of the
+    bundled Qt dialog.  Fall back to QFileDialog if no host helper exists.
+    """
+    start = str(Path(start_dir).expanduser())
 
-    button_box = dialog.findChild(QDialogButtonBox)
-    if button_box is not None:
-        for button in button_box.buttons():
-            role = button_box.buttonRole(button)
-            if role in (
-                QDialogButtonBox.ButtonRole.AcceptRole,
-                QDialogButtonBox.ButtonRole.YesRole,
-            ):
-                button.setText(tr(lang, "open"))
-            elif role in (
-                QDialogButtonBox.ButtonRole.RejectRole,
-                QDialogButtonBox.ButtonRole.NoRole,
-            ):
-                button.setText(tr(lang, "cancel"))
-        apply_uniform_dialog_buttons(dialog)
+    if os.name != "nt":
+        desktop = (
+            (os.environ.get("XDG_CURRENT_DESKTOP") or "") + " " +
+            (os.environ.get("DESKTOP_SESSION") or "")
+        ).lower()
 
-    if dialog.exec() != QDialog.DialogCode.Accepted:
-        return ""
-    selected = dialog.selectedFiles()
-    return selected[0] if selected else ""
+        candidates = []
+        if "kde" in desktop or "plasma" in desktop:
+            candidates.append(("kdialog", ["--getexistingdirectory", start, "--title", title]))
+        if any(x in desktop for x in ("gnome", "cinnamon", "mate", "xfce")):
+            filename = start.rstrip("/") + "/"
+            candidates.append(("zenity", ["--file-selection", "--directory", f"--filename={filename}", f"--title={title}"]))
+        candidates.extend([
+            ("kdialog", ["--getexistingdirectory", start, "--title", title]),
+            ("zenity", ["--file-selection", "--directory", f"--filename={start.rstrip('/')}/", f"--title={title}"]),
+        ])
+
+        seen = set()
+        for tool, args in candidates:
+            if tool in seen:
+                continue
+            seen.add(tool)
+            exe = shutil.which(tool)
+            if not exe:
+                continue
+            try:
+                proc = subprocess.run(
+                    [exe, *args],
+                    text=True,
+                    capture_output=True,
+                    env=external_subprocess_env(),
+                    creationflags=NO_WINDOW,
+                )
+                if proc.returncode == 0:
+                    selected = (proc.stdout or "").strip()
+                    if selected:
+                        return selected
+                if proc.returncode in (1, 255):
+                    return ""
+            except Exception:
+                pass
+
+    options = QFileDialog.Option.ShowDirsOnly
+    return QFileDialog.getExistingDirectory(
+        parent, title, start, options=options
+    )
 
 
 def open_local_folder(path):
@@ -1197,10 +1239,11 @@ AUDIO_FORMAT_IDS = ["original", "m4a", "opus", "mp3", "flac"]
 VIDEO_FORMAT_IDS = ["original", "mp4", "webm", "mkv"]
 AV_FORMAT_IDS = ["auto", "mp4", "mkv", "webm"]
 VIDEO_QUALITY_IDS = ["best", "2160p", "1440p", "1080p", "720p", "480p", "360p"]
-AUDIO_QUALITY_IDS = ["best", "320", "256", "192", "128"]
+AUDIO_QUALITY_IDS = ["best", "256", "128"]
 MP3_VBR_IDS = ["v0", "v2", "v4"]
 MP3_BITRATE_IDS = ["320", "256", "192", "128"]
 M4A_QUALITY_IDS = ["best", "256", "128"]
+AUDIO_VARIANT_IDS = ["standard", "drc"]
 ITEM_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*$")
 
 def format_label(lang, media, fmt):
@@ -1243,7 +1286,7 @@ class AppError(Exception):
 
 FACTORY_PRESETS = [
     {"id": "factory-music-m4a", "name_key": "preset_music_m4a",
-     "media": "audio", "fmt": "m4a", "quality": "best",
+     "media": "audio", "fmt": "m4a", "quality": "best", "audio_variant": "standard",
      "subtitle_mode": "none", "subtitle_lang": "pl", "subtitle_output": "separate"},
     {"id": "factory-music-mp3", "name_key": "preset_music_mp3",
      "media": "audio", "fmt": "mp3", "quality": "v0", "audio_quality_mode": "vbr",
@@ -1253,14 +1296,14 @@ FACTORY_PRESETS = [
      "smart_video_container": "mp4", "smart_video_resolution": "1080",
      "smart_video_fps": "auto", "smart_video_codec": "h264",
      "smart_video_tier": "auto", "smart_video_bitrate": "auto",
-     "smart_audio_format": "m4a", "smart_audio_quality": "best",
+     "smart_audio_format": "m4a", "smart_audio_quality": "best", "smart_audio_variant": "standard",
      "subtitle_mode": "none", "subtitle_lang": "pl", "subtitle_output": "separate"},
     {"id": "factory-video-best", "name_key": "preset_video_best",
      "media": "av", "fmt": "auto", "quality": "best",
      "smart_video_container": "auto", "smart_video_resolution": "auto",
      "smart_video_fps": "auto", "smart_video_codec": "auto",
      "smart_video_tier": "auto", "smart_video_bitrate": "auto",
-     "smart_audio_format": "m4a", "smart_audio_quality": "best",
+     "smart_audio_format": "m4a", "smart_audio_quality": "best", "smart_audio_variant": "standard",
      "subtitle_mode": "none", "subtitle_lang": "pl", "subtitle_output": "separate"},
     {"id": "factory-original", "name_key": "preset_original",
      "media": "audio", "fmt": "original", "quality": "best",
@@ -1307,7 +1350,9 @@ class Item:
     smart_video_bitrate: str = "auto"
     smart_audio_format: str = "auto"
     smart_audio_quality: str = "best"
+    smart_audio_variant: str = "standard"
     audio_quality_mode: str = "vbr"
+    audio_variant: str = "standard"
     advanced_selector: str = ""
     advanced_args: str = ""
 
@@ -1547,8 +1592,12 @@ def migrate_cfg(cfg):
         "Best": "best",
         "320 kb/s": "320",
         "256 kb/s": "256",
+        "~256 kb/s": "256",
+        "Premium / high (~256 kb/s)": "256",
         "192 kb/s": "192",
         "128 kb/s": "128",
+        "~128 kb/s": "128",
+        "Standard (~128 kb/s)": "128",
     }
     for k in ("last_format_audio", "last_format_video", "last_format_av"):
         if cfg.get(k) in fmap:
@@ -1560,7 +1609,7 @@ def migrate_cfg(cfg):
 
 def load_cfg():
     cfg = dict(
-        language="pl",
+        language="en",
         default_download_dir=DEFAULT_DIR,
         default_subfolder="",
         default_playlist=False,
@@ -1577,26 +1626,27 @@ def load_cfg():
         show_presets=True,
         show_advanced=True,
         theme="system",
-        window_width=1220,
-        window_height=790,
-        settings_width=760,
-        settings_height=520,
-        queue_rows_min=3,
+        window_width=697,
+        window_height=932,
+        settings_width=638,
+        settings_height=752,
+        queue_rows_min=4,
         queue_rows_max=5,
-        history_rows_min=2,
-        history_rows_max=3,
-        log_rows_min=2,
-        log_rows_max=3,
+        history_rows_min=3,
+        history_rows_max=4,
+        log_rows_min=3,
+        log_rows_max=4,
         last_subtitle_mode="none",
-        last_subtitle_lang="pl",
+        last_subtitle_lang="en",
         last_subtitle_output="separate",
         presets_initialized=False,
         presets=[],
-        last_media="audio",
-        last_format_audio="original",
+        last_media="av",
+        last_format_audio="m4a",
         last_format_video="original",
         last_format_av="auto",
         last_audio_quality="best",
+        last_audio_variant="standard",
         last_video_quality="best",
         smart_video_container="auto",
         smart_video_resolution="auto",
@@ -1606,6 +1656,7 @@ def load_cfg():
         smart_video_bitrate="auto",
         smart_av_audio_format="m4a",
         smart_av_audio_quality="best",
+        smart_av_audio_variant="standard",
         last_mp3_quality_mode="vbr",
         last_mp3_vbr="v0",
         last_mp3_bitrate="320",
@@ -1635,8 +1686,8 @@ def load_cfg():
             cfg["presets"][i] = dict(factories[preset["id"]])
 
     # Limity wysokości dotyczą wyłącznie trzech dolnych segmentów.
-    # Domyślne wartości 0.4.04: kolejka 3–5, historia 2–3, log 2–3.
-    row_defaults = {"queue": (3, 5), "history": (2, 3), "log": (2, 3)}
+    # Fabryczny układ interfejsu 0.4.41: kolejka 4–5, historia 3–4, log 3–4.
+    row_defaults = {"queue": (4, 5), "history": (3, 4), "log": (3, 4)}
     for prefix, (default_min, default_max) in row_defaults.items():
         min_key = f"{prefix}_rows_min"
         max_key = f"{prefix}_rows_max"
@@ -1745,7 +1796,7 @@ def cookie_error_description(cfg, lang):
 
 
 def _cookie_browser_spec(cfg):
-    lang = cfg.get("language", "pl")
+    lang = cfg.get("language", "en")
     b = cfg.get("cookies_browser", "none")
     if b in {"none", "chromium-extension"}:
         return ""
@@ -2096,7 +2147,7 @@ def download_source_url(it):
         return youtube_music_variant(it.url)
     if getattr(it, "exact_use_music", False):
         return youtube_music_variant(it.url)
-    if it.media == "audio" and it.fmt == "m4a" and it.quality in ("best", "256"):
+    if it.media == "audio" and it.fmt in ("m4a", "opus") and it.quality in ("best", "256"):
         return youtube_music_variant(it.url)
     if it.media == "av":
         return youtube_music_variant(it.url)
@@ -2129,6 +2180,74 @@ def dest_path(text, cfg):
     text = text.strip()
     p = Path(text).expanduser() if text else root
     return p if p.is_absolute() else root / p
+
+def audio_stream_selector(fmt, quality="best", variant="standard", playlist=False):
+    """Return source-audio format preferences for M4A/Opus.
+
+    Quality has priority.  DRC is preferred only within the requested quality;
+    if that DRC variant does not exist, the matching standard stream is used.
+    This makes the fallback explicit and detectable from yt-dlp's selected ID.
+    """
+    fmt = str(fmt or "").lower()
+    quality = str(quality or "best").lower()
+    variant = str(variant or "standard").lower()
+    drc = variant == "drc"
+
+    if fmt == "m4a":
+        if quality == "256":
+            return "141-drc/141" if drc else "141"
+        if quality == "128":
+            return "140-drc/140" if drc else "140"
+        return "141-drc/141/140-drc/140" if drc else "141/140"
+
+    if fmt == "opus":
+        if quality == "256":
+            return "774-drc/774" if drc else "774"
+        if quality == "128":
+            return "251-drc/251" if drc else "251"
+        return (
+            "774-drc/774/251-drc/251/250-drc/250/249-drc/249"
+            if drc else
+            "774/251/250/249"
+        )
+
+    return "bestaudio"
+
+
+def item_requests_drc(it):
+    if str(getattr(it, "advanced_selector", "") or "").strip():
+        return False
+    if str(getattr(it, "exact_selector", "") or "").strip():
+        return False
+    if getattr(it, "media", "audio") == "audio":
+        return (
+            getattr(it, "fmt", "") in ("m4a", "opus")
+            and getattr(it, "audio_variant", "standard") == "drc"
+        )
+    if getattr(it, "media", "") == "av":
+        return (
+            getattr(it, "smart_audio_format", "") in ("m4a", "opus")
+            and getattr(it, "smart_audio_variant", "standard") == "drc"
+        )
+    return False
+
+
+def drc_fallback_used(it, log):
+    """True when DRC was requested but yt-dlp selected a non-DRC audio ID."""
+    if not item_requests_drc(it):
+        return False
+    selected = re.findall(r"Downloading \d+ format\(s\):\s*([^\n\r]+)", log or "")
+    if not selected:
+        return False
+    # For playlists there can be one selection line per item.  If any selected
+    # item lacks a -drc audio format, report that a standard fallback occurred.
+    for spec in selected:
+        parts = re.split(r"[+,/]", spec.strip())
+        audioish = [p.strip() for p in parts if p.strip()]
+        if audioish and not any("-drc" in p.lower() for p in audioish):
+            return True
+    return False
+
 
 def audio_quality_arg(q):
     return "0" if q in ("best", "v0") else f"{q}K"
@@ -2325,16 +2444,15 @@ def media_args(it, cfg):
         if it.fmt == "original":
             args = ["-f", "bestaudio"]
         elif it.fmt == "m4a":
-            if it.quality == "256":
-                selector = "141"
-            elif it.quality == "128":
-                selector = "140"
-            else:
-                selector = "141/140/bestaudio[ext=m4a]/bestaudio"
+            selector = audio_stream_selector(
+                "m4a", it.quality, getattr(it, "audio_variant", "standard"), it.playlist
+            )
             args = ["-f", selector, "-x", "--audio-format", "m4a"]
         elif it.fmt == "opus":
-            args = ["-f", "bestaudio", "-x", "--audio-format", "opus",
-                    "--audio-quality", audio_quality_arg(it.quality)]
+            selector = audio_stream_selector(
+                "opus", it.quality, getattr(it, "audio_variant", "standard"), it.playlist
+            )
+            args = ["-f", selector, "-x", "--audio-format", "opus"]
         elif it.fmt == "mp3":
             args = ["-f", "bestaudio", "-x", "--audio-format", "mp3",
                     "--audio-quality", mp3_quality_arg(getattr(it, "audio_quality_mode", "vbr"), it.quality)]
@@ -2441,7 +2559,7 @@ def _parse_duration(value):
 
 
 def probe_playlist(url, cfg):
-    lang = cfg.get("language", "pl")
+    lang = cfg.get("language", "en")
     cmd = [
         tool_executable("yt-dlp"), "--ignore-config", "--flat-playlist", "--yes-playlist",
         "--print", "%(playlist_index)s\t%(duration)s\t%(title)s"
@@ -2673,18 +2791,9 @@ def _smart_video_filter_expr(it):
 def _smart_audio_selector(it):
     fmt = str(getattr(it, "smart_audio_format", "auto") or "auto")
     q = str(getattr(it, "smart_audio_quality", "best") or "best")
-    if fmt == "m4a":
-        if q == "256":
-            return "141/140/bestaudio[ext=m4a]/bestaudio" if getattr(it, "playlist", False) else "141"
-        if q == "128":
-            return "140/bestaudio[ext=m4a]/bestaudio"
-        return "141/140/bestaudio[ext=m4a]/bestaudio"
-    if fmt == "opus":
-        if q == "256":
-            return "774/251/bestaudio[acodec*=opus]/bestaudio" if getattr(it, "playlist", False) else "774"
-        if q == "128":
-            return "251/bestaudio[acodec*=opus]/bestaudio"
-        return "774/251/bestaudio[acodec*=opus]/bestaudio"
+    variant = str(getattr(it, "smart_audio_variant", "standard") or "standard")
+    if fmt in ("m4a", "opus"):
+        return audio_stream_selector(fmt, q, variant, getattr(it, "playlist", False))
     return "bestaudio"
 
 
@@ -3007,9 +3116,9 @@ class FormatInspectorDialog(QDialog):
         audio = [f for f in formats if _audio_only(f)]
         video = [f for f in formats if _video_only(f)]
 
-        best_m4a = max((f for f in audio if f.get("ext") == "m4a"), key=_format_bitrate, default=None)
+        best_m4a = max((f for f in audio if f.get("ext") == "m4a" and "-drc" not in str(f.get("format_id") or "").lower()), key=_format_bitrate, default=None)
         best_opus = max(
-            (f for f in audio if f.get("acodec") and "opus" in str(f.get("acodec")).lower()),
+            (f for f in audio if f.get("acodec") and "opus" in str(f.get("acodec")).lower() and "-drc" not in str(f.get("format_id") or "").lower()),
             key=_format_bitrate, default=None
         )
         best_video = max(
@@ -3145,7 +3254,12 @@ class FormatInspectorDialog(QDialog):
         table.cellDoubleClicked.connect(lambda _row, _col: set_selector(False))
 
     def _audio_table(self, formats):
-        headers = ["ID", "Format", "Kodek", "Bitrate", "Hz", "Kanały", "Jakość" if self.lang == "pl" else "Quality"]
+        headers = [
+            "ID", "Format", "Kodek" if self.lang == "pl" else "Codec",
+            "Bitrate", "Hz", "Kanały" if self.lang == "pl" else "Channels",
+            tr(self.lang, "format_variant"),
+            "Jakość" if self.lang == "pl" else "Quality",
+        ]
         table = self._prepare_table(headers)
         rows = sorted(
             formats,
@@ -3166,6 +3280,12 @@ class FormatInspectorDialog(QDialog):
                 (_human_kbps(abr), abr),
                 (str(int(f.get("asr") or 0)) if f.get("asr") else "—", float(f.get("asr") or 0)),
                 (str(f.get("audio_channels") or "—"), float(f.get("audio_channels") or 0)),
+                (
+                    tr(self.lang, "format_variant_drc")
+                    if "-drc" in str(f.get("format_id") or "").lower()
+                    else tr(self.lang, "format_variant_standard"),
+                    1 if "-drc" in str(f.get("format_id") or "").lower() else 0,
+                ),
                 (note, note.casefold()),
             ])
         self._enable_selector_pick(table)
@@ -3393,7 +3513,7 @@ class Worker(QObject):
         return not self.stop_req
 
     def retry_log(self, key, **kwargs):
-        text = tr(self.cfg.get("language", "pl"), key, **kwargs)
+        text = tr(self.cfg.get("language", "en"), key, **kwargs)
         self.log.emit(text)
         return text
 
@@ -3431,7 +3551,7 @@ class Worker(QObject):
         return rc, "\n".join(lines)
 
     def run(self):
-        lang = self.cfg.get("language", "pl")
+        lang = self.cfg.get("language", "en")
         stopped = False
         try:
             for it in self.items:
@@ -3655,7 +3775,12 @@ class Worker(QObject):
                         break
 
                     if rc == 0:
-                        self.done.emit(it.uid, True, "OK", tr(lang, "download_ok"), full, elapsed, duration, sample_valid)
+                        if drc_fallback_used(it, full):
+                            note = tr(lang, "drc_fallback_desc")
+                            self.log.emit(note)
+                            self.done.emit(it.uid, True, "OK_DRC_FALLBACK", note, full, elapsed, duration, sample_valid)
+                        else:
+                            self.done.emit(it.uid, True, "OK", tr(lang, "download_ok"), full, elapsed, duration, sample_valid)
                     elif it.playlist and unresolved and has_download_success(full):
                         # Only failures that remain after all retries count.
                         desc = tr(lang, "partial_playlist", n=len(unresolved))
@@ -3758,17 +3883,99 @@ def apply_app_theme(app, mode):
     app.setPalette(pal)
 
 
+def _version_tuple(value):
+    nums = re.findall(r"\d+", str(value or ""))
+    return tuple(int(x) for x in nums[:4]) or (0,)
+
+
+def github_latest_release(timeout=10):
+    req = Request(
+        GITHUB_RELEASES_API,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": f"{APP_NAME}/{VERSION}",
+        },
+    )
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise
+    tag = str(payload.get("tag_name") or "").lstrip("vV")
+    assets = payload.get("assets") or []
+    appimage = next(
+        (
+            a for a in assets
+            if str(a.get("name") or "").lower().endswith(".appimage")
+            and ("x86_64" in str(a.get("name") or "").lower() or "x64" in str(a.get("name") or "").lower())
+        ),
+        None,
+    )
+    return {
+        "version": tag,
+        "page": payload.get("html_url") or GITHUB_RELEASES_URL,
+        "asset_name": (appimage or {}).get("name"),
+        "asset_url": (appimage or {}).get("browser_download_url"),
+    }
+
+
+def install_appimage_release(release):
+    if not _APPIMAGE_PATH:
+        raise RuntimeError("not running from AppImage")
+    source = Path(_APPIMAGE_PATH).expanduser().resolve()
+    url = str((release or {}).get("asset_url") or "")
+    if not url:
+        raise RuntimeError("release does not contain an x86_64 AppImage asset")
+    if not source.exists():
+        raise RuntimeError(f"current AppImage not found: {source}")
+
+    tmp = source.with_name(source.name + ".download")
+    backup = source.with_name(source.name + ".old")
+    req = Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
+    try:
+        with urlopen(req, timeout=60) as response, tmp.open("wb") as out:
+            shutil.copyfileobj(response, out)
+        if tmp.stat().st_size < 1024 * 1024:
+            raise RuntimeError("downloaded AppImage is unexpectedly small")
+        with tmp.open("rb") as f:
+            if f.read(4) != b"\x7fELF":
+                raise RuntimeError("downloaded file is not an ELF/AppImage")
+        tmp.chmod(source.stat().st_mode | 0o111)
+
+        try:
+            backup.unlink(missing_ok=True)
+        except Exception:
+            pass
+        os.replace(source, backup)
+        try:
+            os.replace(tmp, source)
+        except Exception:
+            os.replace(backup, source)
+            raise
+        try:
+            backup.unlink(missing_ok=True)
+        except Exception:
+            pass
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
 class Settings(QDialog):
     def __init__(self, parent, cfg):
         super().__init__(parent)
         self.base_cfg = dict(cfg)
         self._shared_cfg = cfg
-        self.lang = cfg.get("language", "pl")
+        self.lang = cfg.get("language", "en")
         self.setWindowTitle(tr(self.lang, "settings_title"))
         self.setMinimumSize(420, 300)
         try:
-            settings_w = max(420, int(cfg.get("settings_width", 760)))
-            settings_h = max(300, int(cfg.get("settings_height", 520)))
+            settings_w = max(420, int(cfg.get("settings_width", 638)))
+            settings_h = max(300, int(cfg.get("settings_height", 752)))
         except Exception:
             settings_w, settings_h = 760, 520
         self.resize(settings_w, settings_h)
@@ -3793,7 +4000,7 @@ class Settings(QDialog):
         self.language = NoWheelComboBox()
         self.language.addItem(tr(self.lang, "polish"), "pl")
         self.language.addItem(tr(self.lang, "english"), "en")
-        idx = self.language.findData(cfg.get("language", "pl"))
+        idx = self.language.findData(cfg.get("language", "en"))
         self.language.setCurrentIndex(max(0, idx))
 
         self.dir = QLineEdit(cfg["default_download_dir"])
@@ -4032,7 +4239,10 @@ class Settings(QDialog):
             main.addWidget(shortcuts_box)
 
         update_box = QGroupBox(tr(self.lang, "updates_group"))
-        update_row = QHBoxLayout(update_box)
+        update_layout = QVBoxLayout(update_box)
+        self.update_version_label = QLabel(tr(self.lang, "current_version", version=VERSION))
+        update_layout.addWidget(self.update_version_label)
+        update_row = QHBoxLayout()
         self.check_versions_btn = QPushButton(tr(self.lang, "check_components"))
         self.update_components_btn = QPushButton(tr(self.lang, "update_components"))
         self.check_versions_btn.clicked.connect(self.show_component_versions)
@@ -4040,6 +4250,7 @@ class Settings(QDialog):
         update_row.addWidget(self.check_versions_btn)
         update_row.addWidget(self.update_components_btn)
         update_row.addStretch(1)
+        update_layout.addLayout(update_row)
         main.addWidget(update_box)
 
         main.addStretch()
@@ -4199,55 +4410,66 @@ class Settings(QDialog):
             self.profile.setText(p)
 
     def show_component_versions(self):
-        checks = (
-            ("yt-dlp", [tool_executable("yt-dlp"), "--version"]),
-            ("ffmpeg", [tool_executable("ffmpeg"), "-version"]),
-            ("AtomicParsley", [tool_executable("AtomicParsley"), "--version"]),
-        )
-        versions = []
-        for label, cmd in checks:
-            try:
-                p = subprocess.run(cmd, text=True, capture_output=True, timeout=5, env=external_subprocess_env())
-                raw = (p.stdout or p.stderr or "").strip().splitlines()
-                version = raw[0] if raw else "?"
-                versions.append(f"{label}: {version}")
-            except Exception:
-                versions.append(f"{label}: ?")
-        QMessageBox.information(
-            self, APP_NAME, tr(self.lang, "components_versions", versions="\n".join(versions))
-        )
+        try:
+            release = github_latest_release()
+            if not release or not release.get("version"):
+                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_no_release"))
+                return
+            latest = release["version"]
+            if _version_tuple(latest) > _version_tuple(VERSION):
+                message = (
+                    tr(self.lang, "latest_version", version=latest) + "\n" +
+                    tr(self.lang, "update_available", version=latest)
+                )
+            else:
+                message = tr(self.lang, "update_none", version=VERSION)
+            QMessageBox.information(self, APP_NAME, message)
+        except Exception as exc:
+            QMessageBox.warning(
+                self, APP_NAME, tr(self.lang, "update_failed", error=str(exc))
+            )
 
     def update_components(self):
-        # Portable Linux must not invoke pacman/apt/dnf or modify the host.
-        # A later AppImage release can update binaries inside data/tools.
-        if PORTABLE and os.name != "nt":
-            QMessageBox.information(
-                self, APP_NAME,
-                "W wersji portable aktualizacja składników systemu jest wyłączona. "
-                "Program nie uruchamia pacmana/apt/dnf. Narzędzia portable będą "
-                "w przyszłości aktualizowane w folderze data/tools."
-                if self.lang == "pl" else
-                "System component updates are disabled in the portable build. "
-                "The app does not invoke pacman/apt/dnf. Portable tools will later "
-                "be updated inside data/tools."
-            )
-            return
-        ans = QMessageBox.warning(
-            self, APP_NAME, tr(self.lang, "update_arch_warning"),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        if ans != QMessageBox.StandardButton.Yes:
-            return
         try:
-            subprocess.Popen([
-                "/usr/bin/pkexec", "/usr/bin/pacman", "-Syu", "--needed",
-                "yt-dlp", "ffmpeg", "atomicparsley"
-            ], env=external_subprocess_env())
-            QMessageBox.information(self, APP_NAME, tr(self.lang, "update_started"))
-        except Exception as e:
+            release = github_latest_release()
+            if not release or not release.get("version"):
+                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_no_release"))
+                return
+            latest = release["version"]
+            if _version_tuple(latest) <= _version_tuple(VERSION):
+                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_none", version=VERSION))
+                return
+
+            if not _APPIMAGE_PATH:
+                QDesktopServices.openUrl(QUrl(release.get("page") or GITHUB_RELEASES_URL))
+                QMessageBox.information(self, APP_NAME, tr(self.lang, "update_not_appimage"))
+                return
+
+            ans = QMessageBox.question(
+                self,
+                APP_NAME,
+                tr(self.lang, "update_confirm", version=latest),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                install_appimage_release(release)
+            finally:
+                QApplication.restoreOverrideCursor()
+            QMessageBox.information(
+                self, APP_NAME, tr(self.lang, "update_downloaded", version=latest)
+            )
+        except Exception as exc:
+            try:
+                QApplication.restoreOverrideCursor()
+            except Exception:
+                pass
             QMessageBox.warning(
-                self, APP_NAME, tr(self.lang, "update_failed", error=str(e))
+                self, APP_NAME, tr(self.lang, "update_failed", error=str(exc))
             )
 
     def values(self):
@@ -4381,6 +4603,12 @@ class Main(QMainWindow):
         add_header.setHorizontalSpacing(8)
         add_header.setVerticalSpacing(0)
         self.add_title_label = QLabel()
+        add_title_font = self.add_title_label.font()
+        if add_title_font.pointSizeF() > 0:
+            add_title_font.setPointSizeF(add_title_font.pointSizeF() + 1.0)
+        else:
+            add_title_font.setPixelSize(max(13, add_title_font.pixelSize() + 1))
+        self.add_title_label.setFont(add_title_font)
         self.add_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
         self.settings_btn = QPushButton()
         self.settings_btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -4559,17 +4787,24 @@ class Main(QMainWindow):
         self.format_label_widget = QLabel()
         self.audio_mode_label = QLabel()
         self.quality_label_widget = QLabel()
+        self.audio_variant_label = QLabel()
         self.fmt = NoWheelComboBox()
         self.audio_mode = NoWheelComboBox()
         self.quality = NoWheelComboBox()
-        for combo in (self.fmt, self.audio_mode, self.quality):
+        self.audio_variant = NoWheelComboBox()
+        for combo in (self.fmt, self.audio_mode, self.quality, self.audio_variant):
             combo.setMinimumWidth(90)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.audio_mode.addItem("VBR", "vbr")
         self.audio_mode.addItem("Bitrate", "bitrate")
+        self.audio_variant.addItem("", "standard")
+        self.audio_variant.addItem("", "drc")
+        avi = self.audio_variant.findData(self.cfg.get("last_audio_variant", "standard"))
+        self.audio_variant.setCurrentIndex(avi if avi >= 0 else 0)
         self.fmt.currentIndexChanged.connect(self.format_changed)
         self.audio_mode.currentIndexChanged.connect(self.audio_mode_changed)
         self.quality.currentIndexChanged.connect(self.quality_changed)
+        self.audio_variant.currentIndexChanged.connect(self.audio_variant_changed)
 
         self.audio_format_slot = QWidget()
         afs = QHBoxLayout(self.audio_format_slot)
@@ -4589,6 +4824,12 @@ class Main(QMainWindow):
         aqs.setSpacing(6)
         aqs.addWidget(self.quality_label_widget)
         aqs.addWidget(self.quality, 1)
+        self.audio_variant_slot = QWidget()
+        avs = QHBoxLayout(self.audio_variant_slot)
+        avs.setContentsMargins(0, 0, 0, 0)
+        avs.setSpacing(6)
+        avs.addWidget(self.audio_variant_label)
+        avs.addWidget(self.audio_variant, 1)
         self.audio_layout.addWidget(self.audio_format_slot, 0, 0)
         self.audio_layout.addWidget(self.audio_mode_slot, 0, 1)
         self.audio_layout.addWidget(self.audio_quality_slot, 0, 2)
@@ -4671,12 +4912,19 @@ class Main(QMainWindow):
         ar.setVerticalSpacing(7)
         self.smart_audio_format_label = QLabel()
         self.smart_audio_quality_label = QLabel()
+        self.smart_audio_variant_label = QLabel()
         self.smart_audio_format = NoWheelComboBox()
         self.smart_audio_quality = NoWheelComboBox()
-        self.smart_audio_format.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.smart_audio_quality.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.smart_audio_variant = NoWheelComboBox()
+        for combo in (self.smart_audio_format, self.smart_audio_quality, self.smart_audio_variant):
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.smart_audio_variant.addItem("", "standard")
+        self.smart_audio_variant.addItem("", "drc")
+        svi = self.smart_audio_variant.findData(self.cfg.get("smart_av_audio_variant", "standard"))
+        self.smart_audio_variant.setCurrentIndex(svi if svi >= 0 else 0)
         self.smart_audio_format.currentIndexChanged.connect(self.smart_audio_changed)
         self.smart_audio_quality.currentIndexChanged.connect(self.smart_audio_changed)
+        self.smart_audio_variant.currentIndexChanged.connect(self.smart_audio_changed)
         self.smart_audio_format_slot = QWidget()
         safs = QHBoxLayout(self.smart_audio_format_slot)
         safs.setContentsMargins(0, 0, 0, 0)
@@ -4689,8 +4937,15 @@ class Main(QMainWindow):
         saqs.setSpacing(6)
         saqs.addWidget(self.smart_audio_quality_label)
         saqs.addWidget(self.smart_audio_quality, 1)
+        self.smart_audio_variant_slot = QWidget()
+        savs = QHBoxLayout(self.smart_audio_variant_slot)
+        savs.setContentsMargins(0, 0, 0, 0)
+        savs.setSpacing(6)
+        savs.addWidget(self.smart_audio_variant_label)
+        savs.addWidget(self.smart_audio_variant, 1)
         ar.addWidget(self.smart_audio_format_slot, 0, 0)
         ar.addWidget(self.smart_audio_quality_slot, 0, 1)
+        ar.addWidget(self.smart_audio_variant_slot, 0, 2)
         ar.setColumnStretch(0, 1)
         ar.setColumnStretch(1, 1)
         ar.setColumnStretch(2, 1)
@@ -4781,6 +5036,7 @@ class Main(QMainWindow):
         queue_pane_layout.setContentsMargins(0, 0, 0, 0)
 
         self.queue_box = QGroupBox()
+        self.queue_box.setObjectName("primarySectionTitle")
         self.queue_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -4863,6 +5119,7 @@ class Main(QMainWindow):
         # Ukryty panel nie zabiera miejsca, więc kolejka automatycznie dostaje
         # większą część wysokości.
         self.history_box = QGroupBox()
+        self.history_box.setObjectName("primarySectionTitle")
         self.history_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -4895,6 +5152,7 @@ class Main(QMainWindow):
         root.addWidget(self.history_box, 2)
 
         self.log_box = QGroupBox()
+        self.log_box.setObjectName("primarySectionTitle")
         self.log_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -4949,7 +5207,7 @@ class Main(QMainWindow):
 
     @property
     def lang(self):
-        return self.cfg.get("language", "pl")
+        return self.cfg.get("language", "en")
 
     def apply_language(self):
         lang = self.lang
@@ -4964,6 +5222,9 @@ class Main(QMainWindow):
         self.format_label_widget.setText(tr(lang, "format"))
         self.audio_mode_label.setText(tr(lang, "audio_mode"))
         self.quality_label_widget.setText(tr(lang, "quality"))
+        self.audio_variant_label.setText(tr(lang, "audio_variant"))
+        for i in range(self.audio_variant.count()):
+            self.audio_variant.setItemText(i, tr(lang, "audio_variant_drc" if self.audio_variant.itemData(i) == "drc" else "audio_variant_standard"))
         for i in range(self.audio_mode.count()):
             self.audio_mode.setItemText(i, tr(lang, "audio_mode_vbr" if self.audio_mode.itemData(i) == "vbr" else "audio_mode_bitrate"))
         self.smart_video_widget.setTitle(tr(lang, "video_rules"))
@@ -4976,6 +5237,9 @@ class Main(QMainWindow):
         self.smart_bitrate_label.setText(tr(lang, "video_bitrate"))
         self.smart_audio_format_label.setText(tr(lang, "audio_format"))
         self.smart_audio_quality_label.setText(tr(lang, "quality"))
+        self.smart_audio_variant_label.setText(tr(lang, "audio_variant"))
+        for i in range(self.smart_audio_variant.count()):
+            self.smart_audio_variant.setItemText(i, tr(lang, "audio_variant_drc" if self.smart_audio_variant.itemData(i) == "drc" else "audio_variant_standard"))
         arrow = "▼" if self.advanced_toggle.isChecked() else "▶"
         self.advanced_toggle.setText(f"{arrow} {tr(lang, 'advanced_title')}")
         self.advanced_selector_label.setText(tr(lang, "advanced_selector"))
@@ -5137,7 +5401,9 @@ class Main(QMainWindow):
             smart_video_bitrate=self.smart_bitrate.currentData() or "auto" if hasattr(self, "smart_bitrate") else "auto",
             smart_audio_format=self.smart_audio_format.currentData() or "auto" if hasattr(self, "smart_audio_format") else "auto",
             smart_audio_quality=self.smart_audio_quality.currentData() or "best" if hasattr(self, "smart_audio_quality") else "best",
+            smart_audio_variant=self.smart_audio_variant.currentData() or "standard" if hasattr(self, "smart_audio_variant") else "standard",
             audio_quality_mode=self.audio_mode.currentData() or "vbr" if hasattr(self, "audio_mode") else "vbr",
+            audio_variant=self.audio_variant.currentData() or "standard" if hasattr(self, "audio_variant") else "standard",
             advanced_selector=self.advanced_selector.text().strip() if hasattr(self, "advanced_selector") else "",
             advanced_args=self.advanced_args.text().strip() if hasattr(self, "advanced_args") else "",
         )
@@ -5452,6 +5718,7 @@ class Main(QMainWindow):
         try:
             wanted_fmt = self.smart_audio_format.currentData() if self.smart_audio_format.count() else self.cfg.get("smart_av_audio_format", "m4a")
             wanted_q = self.smart_audio_quality.currentData() if self.smart_audio_quality.count() else self.cfg.get("smart_av_audio_quality", "best")
+            wanted_variant = self.smart_audio_variant.currentData() if self.smart_audio_variant.count() else self.cfg.get("smart_av_audio_variant", "standard")
             audio = [f for f in self._smart_payload_formats() if _audio_only(f)]
             dynamic = bool(audio) and not self.effective_pl()
 
@@ -5477,6 +5744,11 @@ class Main(QMainWindow):
                 label = tr(self.lang, "premium_256") if q == "256" else tr(self.lang, "standard_128")
                 q_opts.append((label, q))
             self._set_combo_options(self.smart_audio_quality, q_opts, wanted_q or "best")
+            vi = self.smart_audio_variant.findData(wanted_variant or "standard")
+            self.smart_audio_variant.setCurrentIndex(vi if vi >= 0 else 0)
+            explicit_family = (self.smart_audio_format.currentData() or "auto") in ("m4a", "opus")
+            self.smart_audio_variant_slot.setVisible(explicit_family)
+            self.smart_audio_variant.setEnabled(explicit_family)
         finally:
             self._smart_refreshing = False
 
@@ -5532,6 +5804,7 @@ class Main(QMainWindow):
             return
         self.cfg["smart_av_audio_format"] = self.smart_audio_format.currentData() or "auto"
         self.cfg["smart_av_audio_quality"] = self.smart_audio_quality.currentData() or "best"
+        self.cfg["smart_av_audio_variant"] = self.smart_audio_variant.currentData() or "standard"
         save_cfg(self.cfg)
         self.refresh_smart_audio_options()
         self.update_advanced_preview()
@@ -5578,6 +5851,13 @@ class Main(QMainWindow):
                 rows = strict
         if not rows:
             return {}
+        wanted_variant = self.smart_audio_variant.currentData() or "standard"
+        variant_rows = [
+            f for f in rows
+            if ("-drc" in str(f.get("format_id") or "").lower()) == (wanted_variant == "drc")
+        ]
+        if variant_rows:
+            rows = variant_rows
         af = max(rows, key=_format_bitrate)
         merge = self.smart_container.currentData() or "auto"
         if merge not in ("mp4", "mkv", "webm"):
@@ -5665,22 +5945,37 @@ class Main(QMainWindow):
         self.update_advanced_preview()
         self.mark_preset_custom()
 
+    def audio_variant_changed(self):
+        if not hasattr(self, "audio_variant"):
+            return
+        self.cfg["last_audio_variant"] = self.audio_variant.currentData() or "standard"
+        save_cfg(self.cfg)
+        self.update_advanced_preview()
+        self.mark_preset_custom()
+
     def update_audio_tile_layout(self):
         if not hasattr(self, "audio_layout"):
             return
         fmt = self.fmt.currentData() or "original"
         is_mp3 = fmt == "mp3"
+        has_variant = fmt in ("m4a", "opus")
         layout = self.audio_layout
 
-        layout.removeWidget(self.audio_mode_slot)
-        layout.removeWidget(self.audio_quality_slot)
+        for widget in (self.audio_mode_slot, self.audio_quality_slot, self.audio_variant_slot):
+            layout.removeWidget(widget)
+
         self.audio_mode_slot.setVisible(is_mp3)
+        self.audio_variant_slot.setVisible(has_variant)
+
         if is_mp3:
             layout.addWidget(self.audio_mode_slot, 0, 1)
             layout.addWidget(self.audio_quality_slot, 0, 2)
-        else:
-            # Dwa kafelki zajmują dokładnie pierwsze 2/3, trzecie miejsce jest puste.
+        elif has_variant:
             layout.addWidget(self.audio_quality_slot, 0, 1)
+            layout.addWidget(self.audio_variant_slot, 0, 2)
+        else:
+            layout.addWidget(self.audio_quality_slot, 0, 1)
+
         self.audio_quality_slot.setVisible(True)
 
     def refresh_formats(self, remember=True):
@@ -5718,7 +6013,10 @@ class Main(QMainWindow):
 
         self.quality.blockSignals(True)
         self.audio_mode.blockSignals(True)
+        self.audio_variant.blockSignals(True)
         self.quality.clear()
+        avi = self.audio_variant.findData(self.cfg.get("last_audio_variant", "standard"))
+        self.audio_variant.setCurrentIndex(avi if avi >= 0 else 0)
 
         if media == "audio":
             if fmt == "m4a":
@@ -5756,9 +6054,12 @@ class Main(QMainWindow):
                 self.quality.setToolTip(tr(self.lang, "mp3_quality_tip"))
                 self.audio_mode.setToolTip(tr(self.lang, "mp3_quality_tip"))
             elif fmt == "opus":
-                for q in AUDIO_QUALITY_IDS:
-                    self.quality.addItem(quality_label(self.lang, media, q), q)
+                self.quality.addItem(tr(self.lang, "best"), "best")
+                self.quality.addItem(tr(self.lang, "premium_256"), "256")
+                self.quality.addItem(tr(self.lang, "standard_128"), "128")
                 wanted = self.cfg.get("last_audio_quality", "best")
+                if wanted not in AUDIO_QUALITY_IDS:
+                    wanted = "best"
                 idx = self.quality.findData(wanted)
                 self.quality.setCurrentIndex(idx if idx >= 0 else 0)
                 self.quality.setEnabled(True)
@@ -5778,6 +6079,7 @@ class Main(QMainWindow):
             self.quality.setToolTip(tr(self.lang, "video_quality_tip"))
 
         self.audio_mode.blockSignals(False)
+        self.audio_variant.blockSignals(False)
         self.quality.blockSignals(False)
         self.update_audio_tile_layout()
         if remember:
@@ -5811,8 +6113,8 @@ class Main(QMainWindow):
     def restore_window_geometry(self):
         """Restore only main-window width/height, never global X/Y position."""
         try:
-            w = int(self.cfg.get("window_width", 1220))
-            h = int(self.cfg.get("window_height", 790))
+            w = int(self.cfg.get("window_width", 697))
+            h = int(self.cfg.get("window_height", 932))
             w = max(self.minimumWidth(), w)
             h = max(self.minimumHeight(), h)
             self.resize(w, h)
@@ -5854,6 +6156,7 @@ class Main(QMainWindow):
             "media": media,
             "fmt": self.fmt.currentData() or "original",
             "quality": self.quality.currentData() or "best",
+            "audio_variant": self.audio_variant.currentData() or "standard",
             "subtitle_mode": self.subtitle_mode.currentData() or "none",
             "subtitle_lang": self.subtitle_lang.currentData() or "pl",
             "subtitle_output": self.subtitle_output.currentData() or "separate",
@@ -5870,6 +6173,7 @@ class Main(QMainWindow):
                 "smart_video_bitrate": self.smart_bitrate.currentData() or "auto",
                 "smart_audio_format": self.smart_audio_format.currentData() or "auto",
                 "smart_audio_quality": self.smart_audio_quality.currentData() or "best",
+                "smart_audio_variant": self.smart_audio_variant.currentData() or "standard",
             })
         return data
 
@@ -5950,6 +6254,9 @@ class Main(QMainWindow):
                 qi = self.quality.findData(preset.get("quality", "v0" if (self.fmt.currentData() or "") == "mp3" else "best"))
                 if qi >= 0:
                     self.quality.setCurrentIndex(qi)
+                vi = self.audio_variant.findData(preset.get("audio_variant", "standard"))
+                if vi >= 0:
+                    self.audio_variant.setCurrentIndex(vi)
             else:
                 smart_values = {
                     self.smart_container: preset.get("smart_video_container", preset.get("fmt", "auto")),
@@ -5960,6 +6267,7 @@ class Main(QMainWindow):
                     self.smart_bitrate: preset.get("smart_video_bitrate", "auto"),
                     self.smart_audio_format: preset.get("smart_audio_format", "m4a"),
                     self.smart_audio_quality: preset.get("smart_audio_quality", "best"),
+                    self.smart_audio_variant: preset.get("smart_audio_variant", "standard"),
                 }
                 for combo, value in smart_values.items():
                     idx = combo.findData(value)
@@ -6096,6 +6404,7 @@ class Main(QMainWindow):
                     self.cfg["last_mp3_bitrate"] = self.quality.currentData() or "320"
             elif self.fmt.currentData() in ("opus", "m4a"):
                 self.cfg["last_audio_quality"] = self.quality.currentData()
+                self.cfg["last_audio_variant"] = self.audio_variant.currentData() or "standard"
         else:
             self.cfg["smart_video_container"] = self.smart_container.currentData() or "auto"
             self.cfg["smart_video_resolution"] = self.smart_resolution.currentData() or "auto"
@@ -6106,6 +6415,7 @@ class Main(QMainWindow):
             if media == "av":
                 self.cfg["smart_av_audio_format"] = self.smart_audio_format.currentData() or "auto"
                 self.cfg["smart_av_audio_quality"] = self.smart_audio_quality.currentData() or "best"
+                self.cfg["smart_av_audio_variant"] = self.smart_audio_variant.currentData() or "standard"
 
         self.cfg["advanced_selector"] = self.advanced_selector.text().strip()
         self.cfg["advanced_args"] = self.advanced_args.text().strip()
@@ -6179,7 +6489,9 @@ class Main(QMainWindow):
                 smart_video_bitrate=self.smart_bitrate.currentData() or "auto" if media != "audio" else "auto",
                 smart_audio_format=self.smart_audio_format.currentData() or "auto" if media == "av" else "auto",
                 smart_audio_quality=self.smart_audio_quality.currentData() or "best" if media == "av" else "best",
+                smart_audio_variant=self.smart_audio_variant.currentData() or "standard" if media == "av" else "standard",
                 audio_quality_mode=self.audio_mode.currentData() or "vbr" if media == "audio" else "vbr",
+                audio_variant=self.audio_variant.currentData() or "standard" if media == "audio" else "standard",
                 advanced_selector=custom_selector,
                 advanced_args=custom_args,
             )
@@ -6207,6 +6519,13 @@ class Main(QMainWindow):
         status = tr(self.lang, "waiting")
         fmt_text = format_label(self.lang, it.media, it.fmt)
         quality_text = quality_label(self.lang, it.media, it.quality)
+        if it.media == "audio" and it.fmt in ("m4a", "opus"):
+            if it.quality == "256":
+                quality_text = tr(self.lang, "premium_256")
+            elif it.quality == "128":
+                quality_text = tr(self.lang, "standard_128")
+            if getattr(it, "audio_variant", "standard") == "drc":
+                quality_text += " • DRC"
         custom_selector = str(getattr(it, "advanced_selector", "") or "").strip()
         if it.media in ("video", "av") and not getattr(it, "exact_selector", "") and not custom_selector:
             cont = getattr(it, "smart_video_container", "auto") or "auto"
@@ -6224,8 +6543,15 @@ class Main(QMainWindow):
             if it.media == "av":
                 af = getattr(it, "smart_audio_format", "auto") or "auto"
                 aq = getattr(it, "smart_audio_quality", "best") or "best"
-                if af != "auto": bits.append("M4A" if af == "m4a" else "Opus")
-                if aq not in ("best", "auto"): bits.append(f"{aq} kb/s")
+                if af != "auto":
+                    bits.append("M4A" if af == "m4a" else "Opus")
+                    av = getattr(it, "smart_audio_variant", "standard") or "standard"
+                    if av == "drc":
+                        bits.append("DRC")
+                if aq == "256":
+                    bits.append("~256 kb/s")
+                elif aq == "128":
+                    bits.append("~128 kb/s")
             quality_text = " • ".join(bits) if bits else tr(self.lang, "best_available")
         if getattr(it, "exact_selector", "") and not custom_selector:
             fmt_text = f"ID {it.exact_selector}"
@@ -6547,6 +6873,8 @@ class Main(QMainWindow):
                 cell.setText(f"{tr(self.lang, 'warning')} {code}")
             elif old_status in ("Gotowe", "Done"):
                 cell.setText(tr(self.lang, "ready"))
+            elif old_status in ("Gotowe • standard (brak DRC)", "Done • standard (DRC unavailable)"):
+                cell.setText(tr(self.lang, "drc_fallback_status"))
             elif old_status in ("Przerwano", "Stopped"):
                 cell.setText(tr(self.lang, "stopped"))
             elif old_status in ("Pobieranie…", "Downloading…"):
@@ -6856,7 +7184,11 @@ class Main(QMainWindow):
         cell = self.table.item(row, 6)
         if ok:
             self.item_state[uid] = "done"
-            cell.setText(tr(self.lang, "ready"))
+            cell.setText(
+                tr(self.lang, "drc_fallback_status")
+                if code == "OK_DRC_FALLBACK"
+                else tr(self.lang, "ready")
+            )
             cell.setToolTip(desc)
         elif code == "STOP":
             # Keep it eligible for a future manual restart.
@@ -7102,6 +7434,20 @@ def runtime_self_test():
         })
         if no_cookie != []:
             errors.append(f"unexpected no-cookie args: {no_cookie!r}")
+        defaults = load_cfg()
+        # In CI/AppImage this may read a portable config only if one exists;
+        # fresh builds should still expose the factory defaults below.
+        if not CFG_FILE.exists():
+            if defaults.get("language") != "en":
+                errors.append(f"fresh default language is not English: {defaults.get('language')!r}")
+            expected_rows = (4, 5, 3, 4, 3, 4)
+            got_rows = (
+                defaults.get("queue_rows_min"), defaults.get("queue_rows_max"),
+                defaults.get("history_rows_min"), defaults.get("history_rows_max"),
+                defaults.get("log_rows_min"), defaults.get("log_rows_max"),
+            )
+            if got_rows != expected_rows:
+                errors.append(f"fresh row defaults are wrong: {got_rows!r}")
     except Exception as exc:
         errors.append(f"cookies_args(no login) failed: {exc!r}")
 
@@ -7155,6 +7501,22 @@ def runtime_self_test():
                     os.environ["KDE_SESSION_VERSION"] = old_kde
         except Exception as exc:
             errors.append(f"cookies_args(brave) failed: {exc!r}")
+
+    try:
+        if audio_stream_selector("m4a", "128", "drc") != "140-drc/140":
+            errors.append("M4A DRC selector/fallback is wrong")
+        if audio_stream_selector("opus", "128", "drc") != "251-drc/251":
+            errors.append("Opus DRC selector/fallback is wrong")
+        drc_test_item = Item(
+            playlist=False, destination="", url="https://example.invalid",
+            media="audio", fmt="m4a", quality="128", audio_variant="drc",
+        )
+        if not drc_fallback_used(drc_test_item, "[info] x: Downloading 1 format(s): 140"):
+            errors.append("DRC fallback detection missed standard format")
+        if drc_fallback_used(drc_test_item, "[info] x: Downloading 1 format(s): 140-drc"):
+            errors.append("DRC fallback detection misclassified DRC format")
+    except Exception as exc:
+        errors.append(f"DRC selector self-test failed: {exc!r}")
 
     try:
         with tempfile.TemporaryDirectory() as tmp:
@@ -7237,6 +7599,10 @@ def main():
             subcontrol-position: top center;
             padding-left: 4px;
             padding-right: 4px;
+        }
+        QGroupBox#primarySectionTitle::title {
+            font-size: 11pt;
+            font-weight: 500;
         }
         QPushButton {
             min-width: 0px;
