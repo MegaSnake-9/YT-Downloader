@@ -14,6 +14,8 @@ on:
       - "packaging/appimage/**"
       - "scripts/build-appimage.sh"
       - "pyproject.toml"
+      - "LICENSE"
+      - "PRIVACY.md"
       - "THIRD_PARTY.md"
       - ".github/workflows/appimage.yml"
 
@@ -65,11 +67,19 @@ jobs:
           QT_QPA_PLATFORM=offscreen \
             APPIMAGE_EXTRACT_AND_RUN=1 "$APPIMAGE" --self-test
 
+      - name: Create SHA-256 checksum
+        run: |
+          APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
+          APPIMAGE_NAME="$(basename "$APPIMAGE")"
+          (cd dist && sha256sum "$APPIMAGE_NAME" > "$APPIMAGE_NAME.sha256")
+
       - name: Upload AppImage artifact
         uses: actions/upload-artifact@v4
         with:
           name: YT-Downloader-AppImage-x86_64
-          path: dist/YT-Downloader-*-x86_64.AppImage
+          path: |
+            dist/YT-Downloader-*-x86_64.AppImage
+            dist/YT-Downloader-*-x86_64.AppImage.sha256
           if-no-files-found: error
           compression-level: 0
 
@@ -79,5 +89,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           APPIMAGE="$(find dist -maxdepth 1 -name 'YT-Downloader-*-x86_64.AppImage' -print -quit)"
-          gh release create "$GITHUB_REF_NAME" "$APPIMAGE" \
+          CHECKSUM="${APPIMAGE}.sha256"
+          gh release create "$GITHUB_REF_NAME" "$APPIMAGE" "$CHECKSUM" \
             --title "$GITHUB_REF_NAME" --generate-notes

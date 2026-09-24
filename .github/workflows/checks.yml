@@ -19,6 +19,22 @@ jobs:
       - name: Compile Python source
         run: python -m py_compile src/yt_downloader.py
 
+      - name: Verify project version consistency
+        run: |
+          python - <<'PY'
+          import re, tomllib
+          from pathlib import Path
+          source = Path("src/yt_downloader.py").read_text(encoding="utf-8")
+          m = re.search(r'^VERSION\s*=\s*["\']([^"\']+)', source, re.M)
+          if not m:
+              raise SystemExit("VERSION not found in src/yt_downloader.py")
+          with Path("pyproject.toml").open("rb") as f:
+              project_version = tomllib.load(f)["project"]["version"]
+          if m.group(1) != project_version:
+              raise SystemExit(f"Version mismatch: source={m.group(1)} pyproject={project_version}")
+          print(f"Version OK: {project_version}")
+          PY
+
       - name: Check shell scripts
         run: |
           bash -n scripts/build-portable-preview.sh

@@ -128,6 +128,18 @@ install -m 0644 "$ROOT/assets/icons/yt-downloader-512.png" \
 mkdir -p "$APPDIR/usr/share/doc/yt-downloader"
 install -m 0644 "$ROOT/LICENSE" "$APPDIR/usr/share/doc/yt-downloader/LICENSE-YT-Downloader"
 install -m 0644 "$ROOT/THIRD_PARTY.md" "$APPDIR/usr/share/doc/yt-downloader/THIRD_PARTY.md"
+install -m 0644 "$ROOT/PRIVACY.md" "$APPDIR/usr/share/doc/yt-downloader/PRIVACY.md"
+
+# Record concrete component versions for this specific AppImage build.
+{
+    printf 'YT-Downloader: %s\n' "$VERSION"
+    printf 'Python: %s\n' "$("$VENV/bin/python" -c 'import platform; print(platform.python_version())')"
+    printf 'PySide6: %s\n' "$("$VENV/bin/python" -c 'import PySide6; print(PySide6.__version__)')"
+    printf 'certifi: %s\n' "$("$VENV/bin/python" -c 'import certifi; print(getattr(certifi, "__version__", "unknown"))')"
+    printf 'yt-dlp: %s\n' "$("$APPDIR/usr/bin/yt-dlp" --version | head -n 1)"
+    printf 'Deno: %s\n' "$("$APPDIR/usr/bin/deno" --version | head -n 1)"
+    printf 'FFmpeg: %s\n' "$("$APPDIR/usr/bin/ffmpeg" -version | head -n 1)"
+} > "$APPDIR/usr/share/doc/yt-downloader/COMPONENT_VERSIONS.txt"
 
 # Build a real type-2 AppImage with the current official appimagetool.
 APPIMAGETOOL="$DOWNLOADS/appimagetool-x86_64.AppImage"

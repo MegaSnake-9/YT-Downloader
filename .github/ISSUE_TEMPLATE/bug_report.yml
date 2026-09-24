@@ -7,7 +7,7 @@ body:
     id: version
     attributes:
       label: YT-Downloader version
-      placeholder: 0.4.31
+      placeholder: 0.4.44
     validations:
       required: true
   - type: input

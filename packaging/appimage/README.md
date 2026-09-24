@@ -1,25 +1,24 @@
 # AppImage packaging
 
-The repository can now build a real x86_64 AppImage with:
+The repository builds a self-contained **x86_64 Linux AppImage** with:
 
 ```bash
-./scripts/build-appimage.sh
+bash ./scripts/build-appimage.sh
 ```
 
-The build freezes the Python/PySide6 GUI with PyInstaller and bundles separate
-executables for:
+The build freezes the Python/PySide6 GUI with PyInstaller and bundles separate executables for:
 
 - yt-dlp
-- FFmpeg / ffprobe (LGPL shared build)
+- FFmpeg / ffprobe (`lgpl-shared` build)
 - Deno (JavaScript runtime used by yt-dlp for YouTube)
 
-`appimagetool` then converts the assembled AppDir into a type-2 AppImage.
+It also bundles the CA certificate data required by the in-app GitHub updater and the generic GL/EGL loader libraries needed by the frozen Qt runtime.
+
+`appimagetool` converts the assembled AppDir into a type-2 AppImage.
 
 ## Portable data
 
-When executed as an AppImage, the runtime provides the `APPIMAGE` environment
-variable. YT-Downloader uses the real AppImage path and stores writable data
-beside it:
+When executed as an AppImage, the runtime provides the `APPIMAGE` environment variable. YT-Downloader resolves the real AppImage path and stores writable data beside it:
 
 ```text
 YT-Downloader/
@@ -31,15 +30,29 @@ YT-Downloader/
     └── cache/
 ```
 
-Replacing only the `.AppImage` therefore leaves user settings/history intact.
-Deleting the entire containing folder removes the application and its portable
-data, unless the user separately created desktop/menu shortcuts.
+Replacing only the `.AppImage` leaves user settings/history intact. Deleting the containing folder removes the portable application data, unless the user separately created desktop/menu shortcuts.
 
-## GitHub Actions
+## Runtime integration
 
-`.github/workflows/appimage.yml` builds the same AppImage on Ubuntu 22.04 and
-uploads it as a workflow artifact on relevant pushes to `main` or on a manual
-workflow dispatch.
+The frozen GUI sanitizes PyInstaller's `LD_LIBRARY_PATH` before launching external tools. This is important for host helpers such as KWallet/DBus utilities used by browser-cookie extraction: system helpers must load the host distribution's libraries rather than the AppImage's Qt/runtime libraries.
 
-This is still an early Linux-universal build. Test it on multiple distributions
-and desktop environments before calling it a stable release.
+FFmpeg uses its own private bundled shared-library path, scoped only to the FFmpeg/ffprobe wrappers.
+
+## Licensing metadata
+
+The build installs YT-Downloader's MIT license, `THIRD_PARTY.md`, `PRIVACY.md` and a generated `COMPONENT_VERSIONS.txt` into `usr/share/doc/yt-downloader/` inside the AppImage.
+
+See the repository-root `THIRD_PARTY.md` for the third-party licensing overview.
+
+## GitHub Actions and Releases
+
+`.github/workflows/appimage.yml` builds the same AppImage on Ubuntu 22.04 and uploads it as a workflow artifact on relevant pushes to `main` or on a manual workflow dispatch.
+
+Tags matching `v*` publish a GitHub Release containing:
+
+- `YT-Downloader-<version>-x86_64.AppImage`
+- the corresponding `.sha256` checksum file
+
+The in-app updater reads the latest GitHub Release and replaces only the AppImage, preserving neighboring portable data.
+
+The AppImage is currently a public beta. Test across multiple distributions and desktop environments before declaring a stable release.

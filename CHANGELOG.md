@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.44
+
+- Prepared the repository documentation for a public beta release.
+- Reworked README with AppImage installation, supported-system notes, updater behavior, cookie/account guidance and a clear non-affiliation disclaimer.
+- Added `PRIVACY.md` describing local state, cookie handling, network access and safe bug-report practices.
+- Expanded `THIRD_PARTY.md` with clearer licensing information for yt-dlp, Deno, FFmpeg, Python, PySide6/Qt, PyInstaller, certifi and GL/EGL loader libraries.
+- AppImage builds now include a concrete component-version manifest and the privacy notice.
+- Tagged releases now publish a SHA-256 checksum next to the AppImage.
+- Added CI validation that the source and `pyproject.toml` versions match.
+
 ## 0.4.43
 
 - Make GitHub Actions invoke the AppImage builder through `bash`, so ZIP/Dolphin copies cannot break builds by dropping the executable bit.
