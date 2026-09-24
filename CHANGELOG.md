@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.45
+
+- In-app AppImage updates now adopt the filename of the downloaded GitHub Release instead of keeping the previous version number in the filename.
+- Added one-time startup repair for stale official versioned AppImage filenames left by older updaters; custom user-chosen filenames are preserved.
+- Existing YT-Downloader desktop/application-menu shortcuts are retargeted when the AppImage is renamed.
+- Made the four main section headings (Add to queue, Queue, Download history and Current log) use the same explicitly enlarged font.
+
 ## 0.4.44
 
 - Prepared the repository documentation for a public beta release.

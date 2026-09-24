@@ -53,6 +53,6 @@ Tags matching `v*` publish a GitHub Release containing:
 - `YT-Downloader-<version>-x86_64.AppImage`
 - the corresponding `.sha256` checksum file
 
-The in-app updater reads the latest GitHub Release and replaces only the AppImage, preserving neighboring portable data.
+The in-app updater reads the latest GitHub Release, replaces the AppImage using the new release filename and preserves neighboring portable data.
 
 The AppImage is currently a public beta. Test across multiple distributions and desktop environments before declaring a stable release.

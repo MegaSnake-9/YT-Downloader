@@ -51,7 +51,7 @@ YT-Downloader/
     └── cache/
 ```
 
-Updating replaces only the AppImage. The `data/` directory is preserved, so settings, history and other portable state remain in place.
+Updating replaces only the AppImage and adopts the filename of the new GitHub Release. The `data/` directory is preserved, so settings, history and other portable state remain in place.
 
 Deleting the containing folder removes the portable application data as well. Shortcuts created separately in the desktop/application menu can be removed from YT-Downloader settings before deleting the folder.
 
@@ -78,7 +78,7 @@ See [`PRIVACY.md`](PRIVACY.md) for a more detailed data-flow summary.
 
 ## Updates
 
-The AppImage checks the repository's latest **GitHub Release**. When a newer x86_64 AppImage is available, YT-Downloader can replace the current AppImage while leaving the neighboring `data/` directory untouched.
+The AppImage checks the repository's latest **GitHub Release**. When a newer x86_64 AppImage is available, YT-Downloader can replace the current AppImage, rename it to the new release filename and leave the neighboring `data/` directory untouched.
 
 Release builds also publish a SHA-256 checksum next to the AppImage.
 

@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.44"
+VERSION = "0.4.45"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1251,6 +1251,78 @@ MP3_BITRATE_IDS = ["320", "256", "192", "128"]
 M4A_QUALITY_IDS = ["best", "256", "128"]
 AUDIO_VARIANT_IDS = ["standard", "drc"]
 ITEM_RE = re.compile(r"^[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*$")
+
+
+def _retarget_existing_portable_shortcuts(old_launcher, new_launcher):
+    """Point existing optional .desktop shortcuts at a renamed AppImage.
+
+    Only YT-Downloader shortcuts created by this application are touched, and
+    only when their Exec line still contains the exact previous AppImage path.
+    """
+    if os.name == "nt":
+        return
+    old_exec = f"Exec={_desktop_exec_quote(Path(old_launcher).expanduser().resolve())}"
+    new_exec = f"Exec={_desktop_exec_quote(Path(new_launcher).expanduser().resolve())}"
+    for target in _portable_shortcut_targets().values():
+        try:
+            if not target.is_file():
+                continue
+            text = target.read_text(encoding="utf-8")
+            if old_exec not in text:
+                continue
+            target.write_text(text.replace(old_exec, new_exec), encoding="utf-8")
+            target.chmod(0o755)
+        except Exception:
+            # A shortcut should never make an otherwise successful update fail.
+            pass
+
+
+def _release_appimage_target(source, release):
+    """Return the update target while preserving deliberate custom filenames."""
+    source = Path(source).expanduser().resolve()
+    official_name = re.fullmatch(
+        r"YT-Downloader-(\d+(?:\.\d+){2,3})-x86_64\.AppImage",
+        source.name,
+        flags=re.IGNORECASE,
+    )
+    if not official_name:
+        return source
+    asset_name = Path(str((release or {}).get("asset_name") or "")).name
+    if not asset_name.lower().endswith(".appimage"):
+        asset_name = f"YT-Downloader-{(release or {}).get('version') or VERSION}-x86_64.AppImage"
+    return source.with_name(asset_name)
+
+
+def normalize_running_appimage_filename():
+    """Repair a stale versioned filename left by the pre-0.4.45 updater.
+
+    User-chosen generic/custom filenames are intentionally preserved.  Only
+    official versioned release names are normalized.
+    """
+    global _APPIMAGE_PATH
+    if not _APPIMAGE_PATH or os.name == "nt":
+        return None
+    source = Path(_APPIMAGE_PATH).expanduser().resolve()
+    match = re.fullmatch(
+        r"YT-Downloader-(\d+(?:\.\d+){2,3})-x86_64\.AppImage",
+        source.name,
+        flags=re.IGNORECASE,
+    )
+    if not match or match.group(1) == VERSION or not source.is_file():
+        return source
+
+    target = source.with_name(f"YT-Downloader-{VERSION}-x86_64.AppImage")
+    if target.exists():
+        return source
+    try:
+        os.replace(source, target)
+    except OSError:
+        return source
+
+    _retarget_existing_portable_shortcuts(source, target)
+    _APPIMAGE_PATH = str(target)
+    os.environ["APPIMAGE"] = str(target)
+    return target
 
 def format_label(lang, media, fmt):
     if fmt == "original":
@@ -3945,6 +4017,7 @@ def github_latest_release(timeout=10):
 
 
 def install_appimage_release(release):
+    global _APPIMAGE_PATH
     if not _APPIMAGE_PATH:
         raise RuntimeError("not running from AppImage")
     source = Path(_APPIMAGE_PATH).expanduser().resolve()
@@ -3954,8 +4027,10 @@ def install_appimage_release(release):
     if not source.exists():
         raise RuntimeError(f"current AppImage not found: {source}")
 
-    tmp = source.with_name(source.name + ".download")
-    backup = source.with_name(source.name + ".old")
+    target = _release_appimage_target(source, release)
+    tmp = source.parent / f".{target.name}.{uuid.uuid4().hex}.download"
+    source_backup = source.with_name(source.name + ".old")
+    target_backup = None
     req = Request(url, headers={"User-Agent": f"{APP_NAME}/{VERSION}"})
     try:
         with github_urlopen(req, timeout=60) as response, tmp.open("wb") as out:
@@ -3968,19 +4043,42 @@ def install_appimage_release(release):
         tmp.chmod(source.stat().st_mode | 0o111)
 
         try:
-            backup.unlink(missing_ok=True)
+            source_backup.unlink(missing_ok=True)
         except Exception:
             pass
-        os.replace(source, backup)
+
+        if target != source and target.exists():
+            target_backup = target.with_name(target.name + ".old")
+            try:
+                target_backup.unlink(missing_ok=True)
+            except Exception:
+                pass
+            os.replace(target, target_backup)
+
+        os.replace(source, source_backup)
         try:
-            os.replace(tmp, source)
+            os.replace(tmp, target)
         except Exception:
-            os.replace(backup, source)
+            os.replace(source_backup, source)
+            if target_backup is not None and target_backup.exists() and not target.exists():
+                os.replace(target_backup, target)
             raise
+
+        if target != source:
+            _retarget_existing_portable_shortcuts(source, target)
+        _APPIMAGE_PATH = str(target)
+        os.environ["APPIMAGE"] = str(target)
+
         try:
-            backup.unlink(missing_ok=True)
+            source_backup.unlink(missing_ok=True)
         except Exception:
             pass
+        if target_backup is not None:
+            try:
+                target_backup.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return target
     finally:
         try:
             tmp.unlink(missing_ok=True)
@@ -4626,12 +4724,8 @@ class Main(QMainWindow):
         add_header.setHorizontalSpacing(8)
         add_header.setVerticalSpacing(0)
         self.add_title_label = QLabel()
-        add_title_font = self.add_title_label.font()
-        if add_title_font.pointSizeF() > 0:
-            add_title_font.setPointSizeF(add_title_font.pointSizeF() + 1.0)
-        else:
-            add_title_font.setPixelSize(max(13, add_title_font.pixelSize() + 1))
-        self.add_title_label.setFont(add_title_font)
+        self.add_title_label.setObjectName("primarySectionLabel")
+        self.add_title_label.setStyleSheet("font-size: 11pt; font-weight: 500;")
         self.add_title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
         self.settings_btn = QPushButton()
         self.settings_btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
@@ -5060,6 +5154,7 @@ class Main(QMainWindow):
 
         self.queue_box = QGroupBox()
         self.queue_box.setObjectName("primarySectionTitle")
+        self.queue_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
         self.queue_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -5143,6 +5238,7 @@ class Main(QMainWindow):
         # większą część wysokości.
         self.history_box = QGroupBox()
         self.history_box.setObjectName("primarySectionTitle")
+        self.history_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
         self.history_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -5176,6 +5272,7 @@ class Main(QMainWindow):
 
         self.log_box = QGroupBox()
         self.log_box.setObjectName("primarySectionTitle")
+        self.log_box.setStyleSheet("QGroupBox::title { subcontrol-origin: margin; subcontrol-position: top center; padding-left: 4px; padding-right: 4px; font-size: 11pt; font-weight: 500; }")
         self.log_box.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding
@@ -7567,6 +7664,23 @@ def runtime_self_test():
         errors.append(f"side-effect-free command preview test failed: {exc!r}")
 
     try:
+        fake_source = Path("/tmp/YT-Downloader-0.4.44-x86_64.AppImage")
+        target = _release_appimage_target(fake_source, {
+            "version": "0.4.45",
+            "asset_name": "YT-Downloader-0.4.45-x86_64.AppImage",
+        })
+        if target.name != "YT-Downloader-0.4.45-x86_64.AppImage":
+            errors.append(f"AppImage update target naming is wrong: {target.name!r}")
+        custom = _release_appimage_target(
+            Path("/tmp/YT-Downloader.AppImage"),
+            {"version": "0.4.45", "asset_name": "YT-Downloader-0.4.45-x86_64.AppImage"},
+        )
+        if custom.name != "YT-Downloader.AppImage":
+            errors.append(f"custom AppImage filename was not preserved: {custom.name!r}")
+    except Exception as exc:
+        errors.append(f"AppImage filename self-test failed: {exc!r}")
+
+    try:
         ctx = github_ssl_context()
         if ctx is None:
             errors.append("GitHub SSL context was not created")
@@ -7608,6 +7722,7 @@ def runtime_self_test():
 
 
 def main():
+    normalize_running_appimage_filename()
     if "--self-test" in sys.argv[1:]:
         ensure_portable_dirs()
         raise SystemExit(runtime_self_test())
@@ -7638,6 +7753,10 @@ def main():
             padding-right: 4px;
         }
         QGroupBox#primarySectionTitle::title {
+            font-size: 11pt;
+            font-weight: 500;
+        }
+        QLabel#primarySectionLabel {
             font-size: 11pt;
             font-weight: 500;
         }
