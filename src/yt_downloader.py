@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
 )
 
 APP_NAME = "YT-Downloader"
-VERSION = "0.4.42"
+VERSION = "0.4.43"
 CONTROL_HEIGHT = 28
 GITHUB_REPO = "MegaSnake-9/YT-Downloader"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.43
+
+- Make GitHub Actions invoke the AppImage builder through `bash`, so ZIP/Dolphin copies cannot break builds by dropping the executable bit.
+
 ## 0.4.42
 
 - Fixed GitHub update checks/downloads in AppImage by bundling a trusted CA certificate store.

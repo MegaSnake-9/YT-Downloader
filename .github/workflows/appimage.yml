@@ -40,7 +40,7 @@ jobs:
             libegl1 libgl1 libglx0 libopengl0 libglvnd0
 
       - name: Build AppImage
-        run: ./scripts/build-appimage.sh
+        run: bash ./scripts/build-appimage.sh
 
       - name: Verify AppImage structure
         run: |
